@@ -11,6 +11,8 @@ import (
 
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // SandboxArgs represents the input parameters for the Sandbox execution tool.
@@ -30,26 +32,52 @@ type SandboxResponse struct {
 // RunSandbox runs the provided script in a safe subprocess, captures execution outputs,
 // and maps exit status codes. Safe because runner runs in sandboxed environments.
 func RunSandbox(ctx context.Context, args SandboxArgs) (SandboxResponse, error) {
+	tr := otel.Tracer("game-assist-tools")
+	ctx, span := tr.Start(ctx, "sandbox_execution_tool")
+	defer span.End()
+
 	if args.Code == "" {
-		return SandboxResponse{}, fmt.Errorf("code content cannot be empty")
+		err := fmt.Errorf("code content cannot be empty")
+		span.RecordError(err)
+		return SandboxResponse{}, err
 	}
+
+	span.SetAttributes(
+		attribute.String("sandbox.language", args.Language),
+	)
 
 	// Create a temporary directory inside the workspace for execution
 	tempDir, err := os.MkdirTemp("", "sandbox-*")
 	if err != nil {
+		span.RecordError(err)
 		return SandboxResponse{}, fmt.Errorf("failed to create temporary directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
 
 	lang := strings.ToLower(strings.TrimSpace(args.Language))
+	var resp SandboxResponse
 	switch lang {
 	case "python", "py", "python3":
-		return runPython(ctx, tempDir, args.Code)
+		resp, err = runPython(ctx, tempDir, args.Code)
 	case "cpp", "c++", "cplusplus":
-		return runCpp(ctx, tempDir, args.Code)
+		resp, err = runCpp(ctx, tempDir, args.Code)
 	default:
-		return SandboxResponse{}, fmt.Errorf("unsupported language %q", args.Language)
+		err = fmt.Errorf("unsupported language %q", args.Language)
+		span.RecordError(err)
+		return SandboxResponse{}, err
 	}
+
+	if err != nil {
+		span.RecordError(err)
+		return SandboxResponse{}, err
+	}
+
+	span.SetAttributes(
+		attribute.Bool("sandbox.success", resp.Success),
+		attribute.Int("sandbox.exit_code", resp.ExitCode),
+	)
+
+	return resp, nil
 }
 
 func runPython(ctx context.Context, dir, code string) (SandboxResponse, error) {
