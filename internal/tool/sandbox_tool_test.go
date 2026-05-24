@@ -9,7 +9,7 @@ import (
 func TestSandboxTool_Python_Success(t *testing.T) {
 	ctx := context.Background()
 	code := "print('Hello from python sandbox!')"
-	
+
 	resp, err := RunSandbox(ctx, SandboxArgs{
 		Code:     code,
 		Language: "python",

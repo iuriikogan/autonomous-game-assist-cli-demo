@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -17,6 +18,8 @@ import (
 // Dispatcher defines the interface for launching runner jobs on Kubernetes.
 type Dispatcher interface {
 	DispatchJob(ctx context.Context, jobName, imageName string, args []string) (*batchv1.Job, error)
+	WaitForJob(ctx context.Context, jobName string) error
+	StreamJobLogs(ctx context.Context, jobName string) (io.ReadCloser, error)
 }
 
 type k8sDispatcher struct {
@@ -121,4 +124,85 @@ func (kd *k8sDispatcher) DispatchJob(ctx context.Context, jobName, imageName str
 	}
 
 	return createdJob, nil
+}
+
+// WaitForJob blocks until the specified Job completes (either succeeds or fails).
+func (kd *k8sDispatcher) WaitForJob(ctx context.Context, jobName string) error {
+	namespace := "game-assist"
+	watcher, err := kd.clientset.BatchV1().Jobs(namespace).Watch(ctx, metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("metadata.name=%s", jobName),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to watch job %s: %w", jobName, err)
+	}
+	defer watcher.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return fmt.Errorf("job watch channel closed unexpectedly for job %s", jobName)
+			}
+			job, ok := event.Object.(*batchv1.Job)
+			if !ok {
+				continue
+			}
+			if job.Status.Succeeded > 0 {
+				return nil
+			}
+			if job.Status.Failed > 0 {
+				return fmt.Errorf("job %s failed", jobName)
+			}
+		}
+	}
+}
+
+// StreamJobLogs returns a stream of the Job's Pod logs.
+func (kd *k8sDispatcher) StreamJobLogs(ctx context.Context, jobName string) (io.ReadCloser, error) {
+	namespace := "game-assist"
+
+	// Watch for Pods belonging to this job
+	watcher, err := kd.clientset.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("job-name=%s", jobName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to watch pods for job %s: %w", jobName, err)
+	}
+	defer watcher.Stop()
+
+	var podName string
+	// Wait for a Pod to be created and transition to Running, Succeeded or Failed
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return nil, fmt.Errorf("pod watch channel closed unexpectedly for job %s", jobName)
+			}
+			pod, ok := event.Object.(*corev1.Pod)
+			if !ok {
+				continue
+			}
+			if pod.Status.Phase == corev1.PodRunning || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+				podName = pod.Name
+				break
+			}
+		}
+		if podName != "" {
+			break
+		}
+	}
+
+	// Now stream the logs
+	req := kd.clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+		Follow: true,
+	})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream logs for pod %s: %w", podName, err)
+	}
+	return stream, nil
 }

@@ -1,8 +1,8 @@
 package tool
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"

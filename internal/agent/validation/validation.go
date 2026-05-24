@@ -1,14 +1,14 @@
 package validation
 
 import (
-	"google.golang.org/adk/agent/agent"
+	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/tool"
 )
 
 // New creates the Validation sub-agent.
-func New(model model.Model, sandboxTool tool.Tool) (agent.Agent, error) {
+func New(model model.LLM, sandboxTool tool.Tool) (agent.Agent, error) {
 	instruction := `You are the Validation agent. Your sole responsibility is to dry-run and validate generated code (Python / C++) scripts before final delivery.
 You have access to the "sandbox_tool" tool.
 When provided with code, call the sandbox tool specifying the correct language ("python" or "cpp").
@@ -25,5 +25,6 @@ Analyze the tool's output:
 		Tools: []tool.Tool{
 			sandboxTool,
 		},
+		OutputKey: "validated_script",
 	})
 }

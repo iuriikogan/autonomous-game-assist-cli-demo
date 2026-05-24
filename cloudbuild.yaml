@@ -1,0 +1,46 @@
+steps:
+  # 1. Code Linting
+  - name: 'golang:1.23-bookworm'
+    entrypoint: 'go'
+    args: ['vet', './...']
+    id: 'go-lint'
+
+  # 2. Automated Test Execution
+  - name: 'golang:1.23-bookworm'
+    entrypoint: 'go'
+    args: ['test', '-v', './...']
+    id: 'go-tests'
+    waitFor: ['go-lint']
+
+  # 3. Container Security Scanning (Trivy)
+  # Verifies zero critical/high vulnerabilities before artifact publication
+  - name: 'aquasec/trivy:latest'
+    entrypoint: 'trivy'
+    args: ['fs', '--severity', 'HIGH,CRITICAL', '--exit-code', '1', '.']
+    id: 'security-scan'
+    waitFor: ['go-tests']
+
+  # 4. Docker Build & Container Creation
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '$_REGISTRY_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/agent-runner:$COMMIT_SHA'
+      - '.'
+    id: 'docker-build'
+    waitFor: ['security-scan']
+
+  # 5. Push to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '$_REGISTRY_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/agent-runner:$COMMIT_SHA'
+    id: 'docker-push'
+    waitFor: ['docker-build']
+
+substitutions:
+  _REGISTRY_LOCATION: 'us-central1'
+  _REPOSITORY_NAME: 'autonomous-game-assist'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

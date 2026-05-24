@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -83,5 +84,84 @@ func TestDispatchJob_InvalidParams(t *testing.T) {
 	_, err = dispatcher.DispatchJob(ctx, "job", "", []string{})
 	if err == nil {
 		t.Error("expected error for empty imageName, got nil")
+	}
+}
+
+func TestWaitForJob_Success(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fakeClientset := fake.NewSimpleClientset()
+	dispatcher := NewDispatcherWithClientset(fakeClientset)
+
+	jobName := "test-job"
+	namespace := "game-assist"
+
+	// Submit job
+	_, err := dispatcher.DispatchJob(ctx, jobName, "runner-image", []string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Simulate Job completion in a goroutine
+	go func() {
+		// Wait a bit then update job status
+		// Retrieve job
+		job, err := fakeClientset.BatchV1().Jobs(namespace).Get(ctx, jobName, metav1.GetOptions{})
+		if err != nil {
+			return
+		}
+		job.Status.Succeeded = 1
+		_, _ = fakeClientset.BatchV1().Jobs(namespace).UpdateStatus(ctx, job, metav1.UpdateOptions{})
+	}()
+
+	err = dispatcher.WaitForJob(ctx, jobName)
+	if err != nil {
+		t.Errorf("expected no error waiting for job, got: %v", err)
+	}
+}
+
+func TestStreamJobLogs_Success(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fakeClientset := fake.NewSimpleClientset()
+	dispatcher := NewDispatcherWithClientset(fakeClientset)
+
+	jobName := "test-job"
+	namespace := "game-assist"
+	podName := "test-job-pod"
+
+	// Submit job
+	_, err := dispatcher.DispatchJob(ctx, jobName, "runner-image", []string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Simulate Pod creation and running state
+	go func() {
+		// Create pod with matching labels
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: namespace,
+				Labels: map[string]string{
+					"job-name": jobName,
+				},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+			},
+		}
+		_, _ = fakeClientset.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
+	}()
+
+	// Verify that StreamJobLogs returns successfully (or with the fake's dummy stream)
+	stream, err := dispatcher.StreamJobLogs(ctx, jobName)
+	if err != nil {
+		t.Fatalf("expected no error streaming logs in fake, got: %v", err)
+	}
+	if stream != nil {
+		stream.Close()
 	}
 }
