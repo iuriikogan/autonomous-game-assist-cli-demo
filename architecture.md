@@ -21,9 +21,9 @@ graph TB
         end
 
         subgraph GenAI & Search Services
-            VertexAI[Vertex AI Platform]
+            GeminiEnterpriseAgentPlatform[Gemini Enterprise Agent Platform AI Platform]
             Gemini[Gemini 3.1 Pro / Flash Models]
-            VectorSearch[Vertex Vector Search Endpoint]
+            VectorSearch[Gemini Enterprise Agent Platform Vector Search Endpoint]
         end
 
         subgraph Storage & Security
@@ -78,8 +78,8 @@ graph TB
 * **Gemini 3.1 Flash**: Used for lightweight, latency-critical subtasks.
 * **Multimodal Audio Native Synthesis**: The Creative Audio Agent relies on Gemini's native `audio/wav` response MIME type and the `Aoede` voice preset to generate raw WAV game asset effects directly, avoiding separate text-to-speech pipelines.
 
-### 2.3 Semantic Asset Discovery (Vertex Vector Search)
-* **Vertex Vector Search (Matching Engine)**: Performs real-time, high-scale approximate nearest neighbor (ANN) semantic queries against pre-built asset collections.
+### 2.3 Semantic Asset Discovery (Gemini Enterprise Agent Platform Vector Search)
+* **Gemini Enterprise Agent Platform Vector Search (Matching Engine)**: Performs real-time, high-scale approximate nearest neighbor (ANN) semantic queries against pre-built asset collections.
 * **Text Embeddings API**: Converts natural language queries into semantic dense vectors to enable precise matching inside Vector Search.
 
 ### 2.4 Sandboxed Local Subprocesses

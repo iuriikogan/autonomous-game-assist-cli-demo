@@ -12,15 +12,15 @@ steps:
     id: 'go-tests'
     waitFor: ['go-lint']
 
-  # 3. Container Security Scanning (Trivy)
-  # Verifies zero critical/high vulnerabilities before artifact publication
+  # 3. IaC Security Scanning (Trivy)
+  # Validates Terraform configurations against security best practices
   - name: 'aquasec/trivy:latest'
     entrypoint: 'trivy'
-    args: ['fs', '--severity', 'HIGH,CRITICAL', '--exit-code', '1', '.']
-    id: 'security-scan'
+    args: ['config', '--severity', 'HIGH,CRITICAL', '--exit-code', '1', 'deployments/terraform']
+    id: 'iac-scan'
     waitFor: ['go-tests']
 
-  # 4. Docker Build & Container Creation
+  # 4. Docker Build (Local Image Creation)
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
@@ -28,19 +28,50 @@ steps:
       - '$_REGISTRY_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/agent-runner:$COMMIT_SHA'
       - '.'
     id: 'docker-build'
-    waitFor: ['security-scan']
+    waitFor: ['iac-scan']
 
-  # 5. Push to Artifact Registry
+  # 5. Download Wiz CLI
+  - name: 'alpine'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - 'wget -q https://downloads.wiz.io/v1/wizcli/latest/wizcli-linux-amd64 -O wizcli && chmod +x wizcli'
+    id: 'download-wizcli'
+    waitFor: ['docker-build']
+
+  # 6. Wiz CLI Container Scanning
+  # Perform in-depth security scan of local image using Wiz CLI
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        ./wizcli auth --id $$WIZ_CLIENT_ID --secret $$WIZ_CLIENT_SECRET
+        ./wizcli docker scan --image $_REGISTRY_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/agent-runner:$COMMIT_SHA --policy "Default Container Security Policy"
+    secretEnv: ['WIZ_CLIENT_ID', 'WIZ_CLIENT_SECRET']
+    id: 'wiz-container-scan'
+    waitFor: ['download-wizcli']
+
+  # 7. Push to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
       - '$_REGISTRY_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/agent-runner:$COMMIT_SHA'
     id: 'docker-push'
-    waitFor: ['docker-build']
+    waitFor: ['wiz-container-scan']
 
 substitutions:
   _REGISTRY_LOCATION: 'us-central1'
   _REPOSITORY_NAME: 'autonomous-game-assist'
+  _WIZ_CLIENT_ID_SECRET_NAME: 'global-global-wiz-client-id'
+  _WIZ_CLIENT_SECRET_SECRET_NAME: 'global-global-wiz-client-secret'
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/$_WIZ_CLIENT_ID_SECRET_NAME/versions/latest
+      env: 'WIZ_CLIENT_ID'
+    - versionName: projects/$PROJECT_ID/secrets/$_WIZ_CLIENT_SECRET_SECRET_NAME/versions/latest
+      env: 'WIZ_CLIENT_SECRET'
 
 options:
   logging: CLOUD_LOGGING_ONLY
