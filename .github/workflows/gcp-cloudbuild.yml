@@ -1,0 +1,48 @@
+name: GCP Cloud Build CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Required permissions for Workload Identity Federation
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  gcb-submit:
+    name: Trigger Google Cloud Build
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Checkout the repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Authenticate to Google Cloud using WIF
+      # Configured via GitHub Secrets for flexibility across environments
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+          token_format: 'access_token'
+
+      # 3. Set up gcloud CLI
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      # 4. Submit Build to Google Cloud Build
+      # This triggers the pipeline defined in cloudbuild.yaml
+      - name: Submit Cloud Build
+        run: |
+          gcloud builds submit \
+            --config cloudbuild.yaml \
+            --project ${{ secrets.GCP_PROJECT_ID }} \
+            --substitutions=COMMIT_SHA=${{ github.sha }}

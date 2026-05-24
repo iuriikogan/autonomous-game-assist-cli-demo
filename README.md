@@ -81,3 +81,40 @@ Run Cloud Build to automatically run checks, Trivy security scans, compile the i
 gcloud builds submit --config=cloudbuild.yaml \
   --substitutions=_REGISTRY_LOCATION="us-central1",_REPOSITORY_NAME="autonomous-game-assist"
 ```
+
+## GitHub Actions CI/CD with Workload Identity Federation (WIF)
+
+We utilize GitHub Actions to trigger Cloud Build pipelines securely without storing long-lived GCP service account keys. This is achieved using Workload Identity Federation (WIF).
+
+### Setup Instructions
+
+#### 1. Provision WIF Infrastructure
+Apply the Terraform configuration in `deployments/terraform/` to create the Workload Identity Pool, Provider, and Service Account.
+
+```bash
+cd deployments/terraform
+terraform init
+# Ensure you provide your GKE cluster name to satisfy the variable
+terraform apply -var="project_id=develop-491110" -var="gke_cluster_name=your-gke-cluster"
+```
+
+#### 2. Retrieve Terraform Outputs
+After successful application, note the following outputs:
+- `wif_provider_name`
+- `github_actions_service_account_email`
+
+#### 3. Configure GitHub Secrets
+In your GitHub repository, navigate to **Settings > Secrets and variables > Actions** and add the following secrets:
+
+| Secret Name | Value | Description |
+| :--- | :--- | :--- |
+| `GCP_PROJECT_ID` | `develop-491110` | Your GCP Project ID |
+| `GCP_WIF_PROVIDER` | *Value from `wif_provider_name` output* | Full resource name of the WIF Provider |
+| `GCP_SA_EMAIL` | *Value from `github_actions_service_account_email` output* | Email of the CI/CD Service Account |
+
+### How it Works
+The workflow in `.github/workflows/gcp-cloudbuild.yml` triggers on:
+- Pushes to `main`
+- Pull Requests targeting `main`
+
+It authenticates to GCP using WIF and then submits the build to Cloud Build, executing all steps defined in `cloudbuild.yaml` (linting, testing, security scanning, and pushing the Docker image to Artifact Registry).
