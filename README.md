@@ -28,7 +28,7 @@ graph TD
 1. **Google Cloud Project**: Ensure standard billing is enabled.
 2. **Workload Identity Federation**: Enable inside your GKE cluster to run runner pods without mounting hardcoded credentials.
 3. **API Services**:
-   - Vertex AI API
+   - Gemini Enterprise Agent Platform AI API
    - Cloud Storage API
    - Secret Manager API
 
