@@ -6,6 +6,8 @@ import (
 
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/vector"
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/vertex"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
 )
@@ -30,9 +32,20 @@ type VectorSearchResponse struct {
 // VectorSearch contains the core domain logic for executing the Vector Search,
 // allowing for direct unit testing without mocking the ADK framework.
 func VectorSearch(ctx context.Context, vertexClient vertex.Client, vectorClient vector.Client, args VectorSearchArgs) (VectorSearchResponse, error) {
+	tr := otel.Tracer("game-assist-tools")
+	ctx, span := tr.Start(ctx, "vector_search_tool")
+	defer span.End()
+
 	if args.Query == "" {
-		return VectorSearchResponse{}, fmt.Errorf("query text cannot be empty")
+		err := fmt.Errorf("query text cannot be empty")
+		span.RecordError(err)
+		return VectorSearchResponse{}, err
 	}
+
+	span.SetAttributes(
+		attribute.String("search.query", args.Query),
+		attribute.Int("search.limit", args.Limit),
+	)
 
 	limit := args.Limit
 	if limit <= 0 {
@@ -42,12 +55,14 @@ func VectorSearch(ctx context.Context, vertexClient vertex.Client, vectorClient 
 	// 1. Embed the text query using Vertex AI
 	embedding, err := vertexClient.EmbedText(ctx, args.Query)
 	if err != nil {
+		span.RecordError(err)
 		return VectorSearchResponse{}, fmt.Errorf("failed to embed query text: %w", err)
 	}
 
 	// 2. Query nearest neighbors from the Vector Search database
 	neighbors, err := vectorClient.FindNeighbors(ctx, embedding, limit)
 	if err != nil {
+		span.RecordError(err)
 		return VectorSearchResponse{}, fmt.Errorf("failed to find nearest neighbors: %w", err)
 	}
 

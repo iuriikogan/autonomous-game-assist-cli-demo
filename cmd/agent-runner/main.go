@@ -16,8 +16,11 @@ import (
 	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/coordinator"
 	"github.com/iuriikogan/autonomous-game-assist-cli/internal/tool"
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/gcp"
+	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/trace"
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/vector"
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/vertex"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 )
 
 func main() {
@@ -44,6 +47,13 @@ func main() {
 	if projectID == "" {
 		log.Fatalf("Missing environment variable: GCP_PROJECT")
 	}
+
+	// Initialize OpenTelemetry tracing linked to Google Cloud Trace
+	shutdown, err := trace.InitTracerProvider(ctx, projectID)
+	if err != nil {
+		log.Fatalf("Failed to initialize distributed tracing exporter: %v", err)
+	}
+	defer shutdown(ctx)
 
 	location := os.Getenv("GCP_LOCATION")
 	if location == "" {
@@ -148,16 +158,21 @@ func main() {
 	log.Printf("Starting central coordinator workflow execution...")
 	log.Printf("User Prompt: %q\n\n", prompt)
 
-	// 10. Run sequential agent tree and stream output events
+	// 10. Run sequential agent tree under a root span
+	tr := otel.Tracer("agent-runner")
+	ctx, rootSpan := tr.Start(ctx, "game-assist-workflow")
+
 	events := adkRunner.Run(ctx, *userIDFlag, *sessIDFlag, &genai.Content{
 		Parts: []*genai.Part{
 			{Text: prompt},
 		},
 	}, agent.RunConfig{})
 
+	var runErr error
 	for event, err := range events {
 		if err != nil {
-			log.Fatalf("Execution failed with error: %v", err)
+			runErr = err
+			break
 		}
 		if event.Content != nil {
 			for _, part := range event.Content.Parts {
@@ -167,6 +182,17 @@ func main() {
 			}
 		}
 	}
+
+	if runErr != nil {
+		rootSpan.RecordError(runErr)
+		rootSpan.SetStatus(codes.Error, runErr.Error())
+		rootSpan.End()
+		log.Printf("Execution failed with error: %v", runErr)
+		os.Exit(1)
+	}
+
+	rootSpan.SetStatus(codes.Ok, "Workflow completed successfully")
+	rootSpan.End()
 
 	log.Println("\nAutonomous Link Process completed successfully.")
 }
