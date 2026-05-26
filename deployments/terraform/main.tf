@@ -7,10 +7,19 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 5.0"
     }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 5.0"
+    }
   }
 }
 
 provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+provider "google-beta" {
   project = var.project_id
   region  = var.region
 }
@@ -70,6 +79,7 @@ resource "google_secret_manager_secret" "api_keys" {
 
 # GKE Node Pool with gVisor enabled
 resource "google_container_node_pool" "gvisor_nodes" {
+  provider   = google-beta
   name       = "${local.name_prefix}-nodepool"
   location   = var.region
   cluster    = var.gke_cluster_name
