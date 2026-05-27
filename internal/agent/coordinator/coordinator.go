@@ -15,19 +15,26 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/audio"
+	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/pr"
 	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/promptcrafter"
 	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/unreal"
 	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/validation"
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/gcp"
+
 )
 
 // Config holds all dependencies and configurations for bootstrapping the coordinator workflow.
 type Config struct {
-	Model            model.LLM
-	VectorSearchTool tool.Tool
-	SandboxTool      tool.Tool
-	StorageClient    gcp.StorageClient
-	BucketName       string
+	Model               model.LLM
+	VectorSearchTool    tool.Tool
+	SandboxTool         tool.Tool
+	StorageClient       gcp.StorageClient
+	BucketName          string
+	SecretManagerClient gcp.SecretManagerClient
+	GitHubTokenSecret   string
+	GitHubOwner         string
+	GitHubRepo          string
+	BaseBranch          string
 }
 
 // New creates the Central Coordinator sequential agent workflow.
@@ -46,6 +53,18 @@ func New(cfg Config) (agent.Agent, error) {
 	}
 	if cfg.BucketName == "" {
 		return nil, fmt.Errorf("bucket name is required")
+	}
+	if cfg.SecretManagerClient == nil {
+		return nil, fmt.Errorf("secret manager client is required")
+	}
+	if cfg.GitHubTokenSecret == "" {
+		return nil, fmt.Errorf("github token secret path is required")
+	}
+	if cfg.GitHubOwner == "" {
+		return nil, fmt.Errorf("github repository owner is required")
+	}
+	if cfg.GitHubRepo == "" {
+		return nil, fmt.Errorf("github repository name is required")
 	}
 
 	// 1. Construct sub-agents
@@ -74,17 +93,29 @@ func New(cfg Config) (agent.Agent, error) {
 		return nil, fmt.Errorf("failed to construct GCS Uploader: %w", err)
 	}
 
+	pullRequestAgent, err := pr.New(pr.Config{
+		SecretManagerClient: cfg.SecretManagerClient,
+		SecretPath:          cfg.GitHubTokenSecret,
+		TargetRepoOwner:     cfg.GitHubOwner,
+		TargetRepoName:      cfg.GitHubRepo,
+		BaseBranch:          cfg.BaseBranch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct Pull Request Agent: %w", err)
+	}
+
 	// 2. Combine sub-agents in strict sequential execution order
 	seqConfig := sequentialagent.Config{
 		AgentConfig: agent.Config{
 			Name:        "central_coordinator",
-			Description: "Orchestrates Prompt Crafter, Creative Audio, Unreal Agent, Validation Agent, and uploads to GCS.",
+			Description: "Orchestrates Prompt Crafter, Creative Audio, Unreal Agent, Validation Agent, GCS Uploader, and Pull Request Agent.",
 			SubAgents: []agent.Agent{
 				promptCrafter,
 				creativeAudio,
 				unrealAgent,
 				validationAgent,
 				gcsUploader,
+				pullRequestAgent,
 			},
 		},
 	}
@@ -168,6 +199,13 @@ func (u *gcsUploader) run(ictx agent.InvocationContext) iter.Seq2[*session.Event
 			yield(nil, fmt.Errorf("failed GCS upload for UE5 script %q: %w", scriptObj, err))
 			return
 		}
+
+		// Store GCS URIs in session state for downstream sub-agents
+		audioURI := fmt.Sprintf("gs://%s/%s", u.bucketName, audioObj)
+		scriptURI := fmt.Sprintf("gs://%s/%s", u.bucketName, scriptObj)
+		sess.State().Set("audio_gcs_uri", audioURI)
+		sess.State().Set("script_gcs_uri", scriptURI)
+
 
 		// Return final sequential delivery success event
 		evt := session.NewEvent(ictx.InvocationID())

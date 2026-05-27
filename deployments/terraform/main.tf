@@ -136,11 +136,28 @@ resource "google_container_cluster" "primary" {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
 
+  # Configure Private Cluster to comply with vmExternalIpAccess Org Policy
+  private_cluster_config {
+    enable_private_nodes    = true
+    enable_private_endpoint = false # Allow public access to control plane
+    master_ipv4_cidr_block  = "172.16.0.0/28"
+  }
+
   # Default to standard VPC networking
   network    = "compliance-vpc"
   subnetwork = "compliance-subnet"
 
   ip_allocation_policy {}
+
+  # Configure default node pool to comply with requireShieldedVm Org Policy
+  node_config {
+    service_account = google_service_account.gke_nodes.email
+    
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
+    }
+  }
 
   resource_labels = local.mandatory_labels
   deletion_protection = false
@@ -172,6 +189,12 @@ resource "google_container_node_pool" "gvisor_nodes" {
     # Enable Workload Identity on the node pool
     workload_metadata_config {
       mode = "GKE_METADATA"
+    }
+
+    # Enable Shielded VM options to comply with requireShieldedVm Org Policy
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
     }
 
     # Enable gVisor sandbox

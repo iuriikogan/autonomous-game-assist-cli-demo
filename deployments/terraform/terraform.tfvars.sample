@@ -1,4 +1,4 @@
 project_id       = <Project-ID>
-gke_cluster_name = <GKE-CLUSTER-NAME>
 env              = "dev"
 region           = "us-central1"
+

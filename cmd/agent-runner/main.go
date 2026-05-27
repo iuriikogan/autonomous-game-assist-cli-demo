@@ -62,6 +62,18 @@ func main() {
 
 	secretPath := os.Getenv("GEMINI_API_KEY_SECRET_PATH") // optional, in format: projects/{project}/secrets/{secret}/versions/{version}
 
+	githubTokenSecretPath := os.Getenv("GITHUB_TOKEN_SECRET_PATH")
+	githubOwner := os.Getenv("GITHUB_OWNER")
+	githubRepo := os.Getenv("GITHUB_REPO")
+	githubBaseBranch := os.Getenv("GITHUB_BASE_BRANCH")
+	if githubBaseBranch == "" {
+		githubBaseBranch = "main"
+	}
+
+	if githubTokenSecretPath == "" || githubOwner == "" || githubRepo == "" {
+		log.Fatalf("Missing required GitHub environment configurations. Require: GITHUB_TOKEN_SECRET_PATH, GITHUB_OWNER, GITHUB_REPO")
+	}
+
 	vectorIndexEndpoint := os.Getenv("VECTOR_INDEX_ENDPOINT") // e.g. "projects/123456/locations/us-central1/indexEndpoints/7890"
 	vectorAPIEndpoint := os.Getenv("VECTOR_API_ENDPOINT")     // e.g. "us-central1-aiplatform.googleapis.com"
 	deployedIndexID := os.Getenv("DEPLOYED_INDEX_ID")
@@ -70,20 +82,27 @@ func main() {
 		log.Fatalf("Missing required vector environment configurations. Require: VECTOR_INDEX_ENDPOINT, VECTOR_API_ENDPOINT, DEPLOYED_INDEX_ID")
 	}
 
-	// 2. Resolve Vertex API Key if secret path is supplied, otherwise rely on Workload Identity / ADC
-	apiKey := ""
-	if secretPath != "" {
-		smClient, err := gcp.NewSecretManagerClient(ctx)
+	// 2. Initialize Secret Manager client if needed to resolve secrets securely
+	var smClient gcp.SecretManagerClient
+	if secretPath != "" || githubTokenSecretPath != "" {
+		client, err := gcp.NewSecretManagerClient(ctx)
 		if err != nil {
 			log.Fatalf("Failed to initialize Secret Manager client: %v", err)
 		}
+		smClient = client
+		defer smClient.Close()
+	}
+
+	// Resolve Vertex API Key if secret path is supplied, otherwise rely on Workload Identity / ADC
+	apiKey := ""
+	if secretPath != "" && smClient != nil {
 		resolvedKey, err := smClient.GetSecret(ctx, secretPath)
 		if err != nil {
 			log.Fatalf("Failed to resolve Vertex API Key from Secret Manager: %v", err)
 		}
 		apiKey = resolvedKey
-		smClient.Close()
 	}
+
 
 	// 3. Initialize GCP storage client
 	storageClient, err := gcp.NewStorageClient(ctx)
@@ -134,11 +153,16 @@ func main() {
 
 	// 8. Construct sequential coordinator workflow
 	coordinatorAgent, err := coordinator.New(coordinator.Config{
-		Model:            modelBackend,
-		VectorSearchTool: vectorSearchTool,
-		SandboxTool:      sandboxTool,
-		StorageClient:    storageClient,
-		BucketName:       bucketName,
+		Model:               modelBackend,
+		VectorSearchTool:    vectorSearchTool,
+		SandboxTool:         sandboxTool,
+		StorageClient:       storageClient,
+		BucketName:          bucketName,
+		SecretManagerClient: smClient,
+		GitHubTokenSecret:   githubTokenSecretPath,
+		GitHubOwner:         githubOwner,
+		GitHubRepo:          githubRepo,
+		BaseBranch:          githubBaseBranch,
 	})
 	if err != nil {
 		log.Fatalf("Failed to construct Central Coordinator sequential agent workflow: %v", err)

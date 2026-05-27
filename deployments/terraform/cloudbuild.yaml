@@ -41,7 +41,7 @@ steps:
       - |
         # In actual pipelines, you would supply credentials or use the WIF service account.
         # This runs a syntax check planning step.
-        terraform plan -lock=false -var="project_id=dummy-project-id" -var="gke_cluster_name=dummy-cluster" -var="region=us-central1"
+        terraform plan -lock=false -var="project_id=dummy-project-id" -var="region=us-central1"
 
 options:
   logging: CLOUD_LOGGING
