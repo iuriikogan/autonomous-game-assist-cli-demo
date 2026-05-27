@@ -41,13 +41,9 @@ variable "region" {
   default     = "us-central1"
 }
 
-variable "gke_cluster_name" {
-  type        = string
-  description = "The name of the existing GKE cluster to attach the node pool to"
-}
-
 locals {
-  name_prefix = "${var.project_id}-${var.env}-${var.region}-gameassist"
+  name_prefix  = "${var.project_id}-${var.env}-${var.region}-gameassist"
+  cluster_name = "${var.env}-${var.region}-ga-cluster"
   mandatory_labels = {
     environment = var.env
     owner       = "ikogan"
@@ -62,6 +58,11 @@ resource "google_storage_bucket" "deliverables" {
   location                    = var.region
   force_destroy               = true
   uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  versioning {
+    enabled = true
+  }
 
   labels = local.mandatory_labels
 }
@@ -77,17 +78,96 @@ resource "google_secret_manager_secret" "api_keys" {
   }
 }
 
+# Enable Kubernetes Engine API
+resource "google_project_service" "container" {
+  service            = "container.googleapis.com"
+  disable_on_destroy = false
+}
+
+# Dedicated service account for GKE Node Pool (Principle of Least Privilege)
+resource "google_service_account" "gke_nodes" {
+  account_id   = "${var.env}-${var.region}-ga-node-sa"
+  display_name = "GKE Node Pool Service Account"
+  description  = "Minimally privileged service account for GKE nodes in the gameassist environment"
+}
+
+# IAM Bindings to support minimal telemetry and node operational capability
+resource "google_project_iam_member" "node_logging" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.gke_nodes.email}"
+}
+
+resource "google_project_iam_member" "node_monitoring_metric" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.gke_nodes.email}"
+}
+
+resource "google_project_iam_member" "node_monitoring_viewer" {
+  project = var.project_id
+  role    = "roles/monitoring.viewer"
+  member  = "serviceAccount:${google_service_account.gke_nodes.email}"
+}
+
+resource "google_project_iam_member" "node_metadata_writer" {
+  project = var.project_id
+  role    = "roles/stackdriver.resourceMetadata.writer"
+  member  = "serviceAccount:${google_service_account.gke_nodes.email}"
+}
+
+resource "google_project_iam_member" "node_artifact_registry" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${google_service_account.gke_nodes.email}"
+}
+
+# Provision a secure GKE Cluster (Standard Regional Cluster)
+resource "google_container_cluster" "primary" {
+  name     = local.cluster_name
+  location = var.region
+
+  # We delete the default node pool and configure our custom sandboxed pool instead
+  remove_default_node_pool = true
+  initial_node_count       = 1
+
+  # Enable Workload Identity on the Cluster
+  workload_identity_config {
+    workload_pool = "${var.project_id}.svc.id.goog"
+  }
+
+  # Default to standard VPC networking
+  network    = "compliance-vpc"
+  subnetwork = "compliance-subnet"
+
+  ip_allocation_policy {}
+
+  resource_labels = local.mandatory_labels
+  deletion_protection = false
+}
+
 # GKE Node Pool with gVisor enabled
 resource "google_container_node_pool" "gvisor_nodes" {
   provider   = google-beta
-  name       = "${local.name_prefix}-nodepool"
+  name       = "${var.env}-${var.region}-ga-np"
   location   = var.region
-  cluster    = var.gke_cluster_name
+  cluster    = google_container_cluster.primary.name
   node_count = 1
 
+  depends_on = [
+    google_project_service.container,
+    google_container_cluster.primary,
+    google_project_iam_member.node_logging,
+    google_project_iam_member.node_monitoring_metric,
+    google_project_iam_member.node_monitoring_viewer,
+    google_project_iam_member.node_metadata_writer,
+    google_project_iam_member.node_artifact_registry
+  ]
+
   node_config {
-    preemptible  = true
-    machine_type = "e2-standard-4"
+    preemptible     = true
+    machine_type    = "e2-standard-4"
+    service_account = google_service_account.gke_nodes.email
 
     # Enable Workload Identity on the node pool
     workload_metadata_config {
