@@ -8,37 +8,17 @@ import (
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/vector"
 )
 
-// mockVertexClient is a mock implementation of vertex.Client
-type mockVertexClient struct {
-	GenerateTextFunc func(ctx context.Context, prompt string, usePro bool) (string, error)
-	EmbedTextFunc    func(ctx context.Context, text string) ([]float32, error)
-}
-
-func (m *mockVertexClient) GenerateText(ctx context.Context, prompt string, usePro bool) (string, error) {
-	if m.GenerateTextFunc != nil {
-		return m.GenerateTextFunc(ctx, prompt, usePro)
-	}
-	return "", errors.New("GenerateText not implemented")
-}
-
-func (m *mockVertexClient) EmbedText(ctx context.Context, text string) ([]float32, error) {
-	if m.EmbedTextFunc != nil {
-		return m.EmbedTextFunc(ctx, text)
-	}
-	return nil, errors.New("EmbedText not implemented")
-}
-
-// mockVectorClient is a mock implementation of vector.Client
+// mockVectorClient is a mock implementation of vector.Client mapping to Vector Search 2.0 Search interface.
 type mockVectorClient struct {
-	FindNeighborsFunc func(ctx context.Context, vector []float32, neighborCount int) ([]vector.SearchResult, error)
-	CloseFunc         func() error
+	SearchFunc func(ctx context.Context, query string, limit int) ([]vector.SearchResult, error)
+	CloseFunc  func() error
 }
 
-func (m *mockVectorClient) FindNeighbors(ctx context.Context, vec []float32, neighborCount int) ([]vector.SearchResult, error) {
-	if m.FindNeighborsFunc != nil {
-		return m.FindNeighborsFunc(ctx, vec, neighborCount)
+func (m *mockVectorClient) Search(ctx context.Context, query string, limit int) ([]vector.SearchResult, error) {
+	if m.SearchFunc != nil {
+		return m.SearchFunc(ctx, query, limit)
 	}
-	return nil, errors.New("FindNeighbors not implemented")
+	return nil, errors.New("Search not implemented")
 }
 
 func (m *mockVectorClient) Close() error {
@@ -51,34 +31,37 @@ func (m *mockVectorClient) Close() error {
 func TestVectorSearchTool_Success(t *testing.T) {
 	ctx := context.Background()
 	queryText := "test footstep sound"
-	expectedEmbedding := []float32{0.5, -0.5, 0.1}
+	expectedLimit := 2
 	expectedNeighbors := []vector.SearchResult{
-		{ID: "asset_footstep_gravel", Distance: 0.95},
-		{ID: "asset_footstep_wood", Distance: 0.85},
-	}
-
-	vtxMock := &mockVertexClient{
-		EmbedTextFunc: func(ctx context.Context, text string) ([]float32, error) {
-			if text != queryText {
-				t.Errorf("expected query text %q, got %q", queryText, text)
-			}
-			return expectedEmbedding, nil
+		{
+			ID:          "asset-footstep-gravel",
+			Path:        "Content/Blueprints/ABP_Echo_IK.uasset",
+			Type:        "Blueprint Asset",
+			Description: "Echo Character Animation Blueprint",
+			Distance:    0.95,
+		},
+		{
+			ID:          "asset-footstep-wood",
+			Path:        "Source/OpenWorldRPG/Characters/RPGCharacter.h",
+			Type:        "C++ Source Header",
+			Description: "Main playable character base class",
+			Distance:    0.85,
 		},
 	}
 
 	vecMock := &mockVectorClient{
-		FindNeighborsFunc: func(ctx context.Context, vec []float32, count int) ([]vector.SearchResult, error) {
-			if len(vec) != len(expectedEmbedding) || vec[0] != expectedEmbedding[0] {
-				t.Errorf("unexpected vector passed to FindNeighbors")
+		SearchFunc: func(ctx context.Context, query string, limit int) ([]vector.SearchResult, error) {
+			if query != queryText {
+				t.Errorf("expected search query %q, got %q", queryText, query)
 			}
-			if count != 2 {
-				t.Errorf("expected neighbor count 2, got %d", count)
+			if limit != expectedLimit {
+				t.Errorf("expected limit %d, got %d", expectedLimit, limit)
 			}
 			return expectedNeighbors, nil
 		},
 	}
 
-	vectorSearchTool, err := NewVectorSearchTool(vtxMock, vecMock)
+	vectorSearchTool, err := NewVectorSearchTool(vecMock)
 	if err != nil {
 		t.Fatalf("failed to create VectorSearchTool: %v", err)
 	}
@@ -88,23 +71,25 @@ func TestVectorSearchTool_Success(t *testing.T) {
 	}
 
 	// Invoke and assert the handler directly
-	resp, err := VectorSearch(ctx, vtxMock, vecMock, VectorSearchArgs{
+	resp, err := VectorSearch(ctx, vecMock, VectorSearchArgs{
 		Query: queryText,
-		Limit: 2,
+		Limit: expectedLimit,
 	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected error during VectorSearch call: %v", err)
 	}
 
 	if len(resp.Results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(resp.Results))
 	}
 
-	if resp.Results[0].ID != "asset_footstep_gravel" || resp.Results[0].Distance != 0.95 {
-		t.Errorf("unexpected result[0]: %+v", resp.Results[0])
+	r1 := resp.Results[0]
+	if r1.ID != "asset-footstep-gravel" || r1.Path != "Content/Blueprints/ABP_Echo_IK.uasset" || r1.Type != "Blueprint Asset" || r1.Description != "Echo Character Animation Blueprint" || r1.Distance != 0.95 {
+		t.Errorf("unexpected result[0]: %+v", r1)
 	}
 
-	if resp.Results[1].ID != "asset_footstep_wood" || resp.Results[1].Distance != 0.85 {
-		t.Errorf("unexpected result[1]: %+v", resp.Results[1])
+	r2 := resp.Results[1]
+	if r2.ID != "asset-footstep-wood" || r2.Path != "Source/OpenWorldRPG/Characters/RPGCharacter.h" || r2.Type != "C++ Source Header" || r2.Description != "Main playable character base class" || r2.Distance != 0.85 {
+		t.Errorf("unexpected result[1]: %+v", r2)
 	}
 }

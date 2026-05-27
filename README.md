@@ -1,26 +1,28 @@
 # Autonomous Game Assist CLI & Runner
 
-An enterprise-grade, cloud-native AI agent runner built in Go using the Google ADK (Agent Development Kit) framework and Gemini 3.1 Pro.
+An enterprise-grade, cloud-native AI agent suite built in Go using the Google ADK (Agent Development Kit) framework and Gemini 3.1 Pro, featuring automated asset synthesis, Level Blueprint semantic retrieval, process sandboxing, and automated GitHub Pull Request reviews.
 
 ## High-Level Architecture
 
 ```mermaid
 graph TD
-    User[Game Developer] -->|CLI Prompt| Runner[cmd/agent-runner]
+    User[Game Developer] -->|CLI generate| Runner[GKE Job: cmd/agent-runner]
     Runner -->|Initiates| Coordinator[internal/agent/coordinator]
     
     subgraph Coordinator Workflow
         direction TB
-        P1[Prompt Crafter Sub-Agent] -->|1. Expand Foley Description| P2[Creative Audio Sub-Agent]
+        P1[Prompt Crafter Agent] -->|1. Expand Foley Description| P2[Creative Audio Agent]
         P2 -->|2. Synthesize WAV Output| P3[Unreal Agent]
         P3 -->|3. Retrieve Context via Vector Search| P3
-        P3 -->|4. Generate UE5 Python Script| P4[Validation Sub-Agent]
+        P3 -->|4. Generate UE5 Python Script| P4[Validation Agent]
         P4 -->|5. Dry-Run via Subprocess Sandbox| P4
-        P4 -->|6. Verify Success / Auto-Correct| P5[GCS Uploader Sub-Agent]
+        P4 -->|6. Verify Success / Auto-Correct| P5[GCS Uploader Agent]
+        P5 -->|7. Upload Assets| P6[Pull Request Agent]
     end
     
-    P5 -->|7. Upload Assets| GCS[Google Cloud Storage]
+    P5 -->|Upload WAV & PY| GCS[Google Cloud Storage]
     P3 -->|Query Blueprint context| GVS[Google Cloud Vector Search]
+    P6 -->|8. Commit script & open PR| GH[GitHub Repository]
 ```
 
 ## Prerequisites
@@ -49,6 +51,12 @@ export VECTOR_API_ENDPOINT="us-central1-aiplatform.googleapis.com"
 export VECTOR_INDEX_ENDPOINT="projects/123456789/locations/us-central1/indexEndpoints/987654321"
 export DEPLOYED_INDEX_ID="my_deployed_index_1"
 
+# GitHub Integration Configurations (for PR Agent)
+export GITHUB_TOKEN_SECRET_PATH="projects/your-gcp-project-id/secrets/github-token/versions/latest"
+export GITHUB_OWNER="your-github-handle"
+export GITHUB_REPO="your-repo-name"
+export GITHUB_BASE_BRANCH="main"
+
 # Optional secret version path for Gemini API Key (if not using ADC)
 export GEMINI_API_KEY_SECRET_PATH="projects/your-gcp-project-id/secrets/gemini-key/versions/latest"
 ```
@@ -63,6 +71,22 @@ go build -o agent-runner ./cmd/agent-runner
 
 # Run
 ./agent-runner -prompt "Generate metal footstep sound links on trigger overlap"
+```
+
+## Local Developer CLI Tool (`game-assist`)
+
+The platform is equipped with a local developer CLI (`cmd/game-assist`) to dispatch jobs to GKE and download the final synthesized deliverables.
+
+### 1. Dispatching a generation job
+Submit a natural language request to the GKE sandbox:
+```bash
+go run ./cmd/game-assist generate "generate metal footstep sound links on trigger overlap" --user "dev_ikogan"
+```
+
+### 2. Downloading synthesized assets
+Once the job has completed and the GitHub PR has been opened, download the WAV files and generated python script locally using the session/job ID:
+```bash
+go run ./cmd/game-assist download --session "session-1713919121" --bucket "autonomous-game-assist-deliverables-dev" --dir "./deliverables"
 ```
 
 ## Docker Compilation

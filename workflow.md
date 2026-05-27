@@ -12,6 +12,8 @@ When a game developer triggers the CLI with a high-level request (e.g., `game-as
 sequenceDiagram
     autonumber
     actor Dev as Game Developer
+    participant CLI as Local CLI (game-assist)
+    participant Runner as Agent Runner (GKE Job)
     participant Coordinator as Central Coordinator Agent
     participant PC as Prompt Crafter Agent
     participant CA as Creative Audio Agent
@@ -21,8 +23,14 @@ sequenceDiagram
     participant SB as Sandbox Tool
     participant Uploader as GCS Uploader Agent
     participant GCS as Cloud Storage
+    participant PR as Pull Request Agent
+    participant GH as GitHub API
 
-    Dev->>Coordinator: High-level Request (e.g. "footsteps on metal")
+    Dev->>CLI: game-assist generate --prompt "[request]"
+    activate CLI
+    CLI->>Runner: Deploy GKE Job
+    activate Runner
+    Runner->>Coordinator: Start execution
     activate Coordinator
     Note over Coordinator: Create Trace: "game-assist-workflow"
 
@@ -30,16 +38,16 @@ sequenceDiagram
     Coordinator->>PC: Trigger Expansion
     activate PC
     Note over PC: Start Span: "prompt_crafter_run"
-    PC->>PC: Expand sound texture, speed, resonance, dynamic acoustic properties
-    PC-->>Coordinator: Rich expanded sound description (foley_description)
+    PC->>PC: Expand sound texture & acoustics
+    PC-->>Coordinator: Rich foley_description
     deactivate PC
 
     %% Step 2: Multimodal synthesis
     Coordinator->>CA: Trigger Foley Synthesis
     activate CA
     Note over CA: Start Span: "creative_audio_run"
-    CA->>CA: Natively synthesize WAV audio bytes using Gemini Multimodal Output
-    CA-->>Coordinator: Foley audio WAV file bytes (audio_binary)
+    CA->>CA: Natively synthesize WAV audio bytes
+    CA-->>Coordinator: foley audio WAV bytes
     deactivate CA
 
     %% Step 3: Script generation with semantic context
@@ -49,10 +57,10 @@ sequenceDiagram
     UA->>VS: Query index for matching Level Blueprints
     activate VS
     Note over VS: Start Span: "vector_search_tool"
-    VS-->>UA: Nearest neighbor asset paths & identifiers
+    VS-->>UA: Nearest neighbor asset paths
     deactivate VS
-    UA->>UA: Write UE5 Python integration script linking audio and actors
-    UA-->>Coordinator: Generated Python script (unreal_script)
+    UA->>UA: Write UE5 Python integration script
+    UA-->>Coordinator: Generated script (unreal_script)
     deactivate UA
 
     %% Step 4: Local sandboxed dry-run with self-correction
@@ -64,28 +72,44 @@ sequenceDiagram
         VA->>SB: Execute code in isolated sandbox subprocess
         activate SB
         Note over SB: Start Span: "sandbox_execution_tool"
-        SB-->>VA: compilation/execution success, exit code, errors/stderr
+        SB-->>VA: Exit code, stderr/errors
         deactivate SB
         alt execution fails
-            VA->>VA: Analyze stderr/stack trace & rewrite script
+            VA->>VA: Rewrite script based on stderr
         else success
             Note over VA: End loop immediately on success
         end
     end
     
-    VA-->>Coordinator: Final validated code script (validated_script)
+    VA-->>Coordinator: validated_script
     deactivate VA
 
-    %% Step 5: Delivery
+    %% Step 5: Delivery to Cloud Storage
     Coordinator->>Uploader: Trigger Delivery
     activate Uploader
     Note over Uploader: Start Span: "gcs_uploader_run"
     Uploader->>GCS: Upload audio WAV and Python Script
-    Uploader-->>Coordinator: Asset URLs (gs://{bucket}/...)
+    Uploader-->>Coordinator: Asset GCS URIs
     deactivate Uploader
 
-    Coordinator-->>Dev: Success notification with final Cloud Storage paths
+    %% Step 6: Human-in-the-loop Pull Request
+    Coordinator->>PR: Trigger Pull Request
+    activate PR
+    Note over PR: Start Span: "pull_request_agent_run"
+    PR->>PR: Clone Repo, Create Branch & Commit Script
+    PR->>GH: POST /repos/{owner}/{repo}/pulls (with download links)
+    activate GH
+    GH-->>PR: PR URL (e.g. github.com/.../pulls/1)
+    deactivate GH
+    PR-->>Coordinator: PR URL
+    deactivate PR
+
+    Coordinator-->>Runner: Workflow Complete
     deactivate Coordinator
+    Runner-->>CLI: Complete
+    deactivate Runner
+    CLI-->>Dev: Prints PR URL & GCS paths
+    deactivate CLI
 ```
 
 ---
@@ -130,3 +154,16 @@ sequenceDiagram
 * **State Inputs**: `audio_binary`, `validated_script`
 * **Delivery Output**: gs:// URL paths
 * **Storage Detail**: Generates UUID/session-keyed storage paths, executes secure uploads to Cloud Storage, and emits the final delivery receipt.
+
+### 2.7 Pull Request Agent
+* **Type**: Custom Git/API Agent (`pr.Agent` using GitHub OIDC credential authentication)
+* **State Inputs**: `validated_script` (string), `audio_gcs_uri` (string), `script_gcs_uri` (string), `prompt` (string), `foley_description` (string)
+* **State Output**: Dynamic Pull Request landing URL.
+* **Process Details**:
+  1. Fetches authorized personal access token from Google Secret Manager.
+  2. Initiates ephemeral `/tmp` workspace clone.
+  3. Creates a target branch named `foley-assist-{session_id}`.
+  4. Saves the final validated Python script under `content/scripts/unreal_assist_{session_id}.py`.
+  5. Commits and pushes changes to `origin`.
+  6. Forms a rich markdown review ticket linking both direct GCS synthesized audio and script review locations.
+  7. Dispatches a GitHub Pulls API request to open the PR for reviewer inspection.
