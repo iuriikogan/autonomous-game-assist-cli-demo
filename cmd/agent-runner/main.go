@@ -18,7 +18,6 @@ import (
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/gcp"
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/trace"
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/vector"
-	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/vertex"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -74,12 +73,9 @@ func main() {
 		log.Fatalf("Missing required GitHub environment configurations. Require: GITHUB_TOKEN_SECRET_PATH, GITHUB_OWNER, GITHUB_REPO")
 	}
 
-	vectorIndexEndpoint := os.Getenv("VECTOR_INDEX_ENDPOINT") // e.g. "projects/123456/locations/us-central1/indexEndpoints/7890"
-	vectorAPIEndpoint := os.Getenv("VECTOR_API_ENDPOINT")     // e.g. "us-central1-aiplatform.googleapis.com"
-	deployedIndexID := os.Getenv("DEPLOYED_INDEX_ID")
-
-	if vectorIndexEndpoint == "" || vectorAPIEndpoint == "" || deployedIndexID == "" {
-		log.Fatalf("Missing required vector environment configurations. Require: VECTOR_INDEX_ENDPOINT, VECTOR_API_ENDPOINT, DEPLOYED_INDEX_ID")
+	vectorCollectionID := os.Getenv("VECTOR_COLLECTION_ID")
+	if vectorCollectionID == "" {
+		vectorCollectionID = fmt.Sprintf("%s-dev-%s-gameassist-collection", projectID, location)
 	}
 
 	// 2. Initialize Secret Manager client if needed to resolve secrets securely
@@ -111,20 +107,14 @@ func main() {
 	}
 	defer storageClient.Close()
 
-	// 4. Initialize Google Vector search database client
-	vectorClient, err := vector.NewClient(ctx, vectorAPIEndpoint, vectorIndexEndpoint, deployedIndexID)
+	// 4. Initialize Google Vector search database client (Vector Search 2.0 Collections)
+	vectorClient, err := vector.NewClient(ctx, projectID, location, vectorCollectionID)
 	if err != nil {
-		log.Fatalf("Failed to initialize Vector search client: %v", err)
+		log.Fatalf("Failed to initialize Vector Search 2.0 client: %v", err)
 	}
 	defer vectorClient.Close()
 
-	// 5. Initialize Vertex AI model wrapper (used by the Vector Search tool for query embeddings)
-	vertexWrapper, err := vertex.NewClient(ctx, projectID, location)
-	if err != nil {
-		log.Fatalf("Failed to initialize Vertex AI wrapper: %v", err)
-	}
-
-	// 6. Initialize ADK Gemini LLM Backend
+	// 5. Initialize ADK Gemini LLM Backend
 	genaiCfg := &genai.ClientConfig{
 		Project:  projectID,
 		Location: location,
@@ -140,8 +130,8 @@ func main() {
 		log.Fatalf("Failed to initialize Gemini 3.1 Pro backend: %v", err)
 	}
 
-	// 7. Initialize custom tools
-	vectorSearchTool, err := tool.NewVectorSearchTool(vertexWrapper, vectorClient)
+	// 6. Initialize custom tools (No local embedding client required for Vector Search 2.0)
+	vectorSearchTool, err := tool.NewVectorSearchTool(vectorClient)
 	if err != nil {
 		log.Fatalf("Failed to create Vector Search tool: %v", err)
 	}

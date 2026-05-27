@@ -1,108 +1,175 @@
 package vector
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 
-	aiplatform "cloud.google.com/go/aiplatform/apiv1"
-	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
-	"github.com/googleapis/gax-go/v2"
-	"google.golang.org/api/option"
+	"golang.org/x/oauth2/google"
 )
 
-// MatchClient interface wraps the MatchClient from the GCloud AI Platform SDK
-// to make it unit-testable.
-type MatchClient interface {
-	FindNeighbors(ctx context.Context, req *aiplatformpb.FindNeighborsRequest, opts ...gax.CallOption) (*aiplatformpb.FindNeighborsResponse, error)
-	Close() error
-}
-
-// SearchResult represents a neighbor match from the Vector database.
+// SearchResult represents a matched record from the Vector Search 2.0 Collection.
 type SearchResult struct {
-	ID       string
-	Distance float64
+	ID          string
+	Path        string
+	Type        string
+	Description string
+	Distance    float64
 }
 
-// Client defines the interface for executing Vector Search operations.
+// Client defines the interface for executing Vector Search 2.0 semantic queries.
 type Client interface {
-	FindNeighbors(ctx context.Context, vector []float32, neighborCount int) ([]SearchResult, error)
+	Search(ctx context.Context, query string, limit int) ([]SearchResult, error)
 	Close() error
 }
 
 type vectorClient struct {
-	matchClient     MatchClient
-	indexEndpoint   string
-	deployedIndexID string
+	httpClient   *http.Client
+	projectID    string
+	location     string
+	collectionID string
+	baseURL      string
 }
 
-// NewClient creates a new Vector Search client.
-func NewClient(ctx context.Context, apiEndpoint, indexEndpoint, deployedIndexID string) (Client, error) {
-	if apiEndpoint == "" {
-		return nil, fmt.Errorf("API endpoint cannot be empty")
+// NewClient creates a new REST-based Vector Search 2.0 client using Google Application Default Credentials.
+func NewClient(ctx context.Context, projectID, location, collectionID string) (Client, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("project ID cannot be empty")
 	}
-	if indexEndpoint == "" {
-		return nil, fmt.Errorf("Index Endpoint resource name cannot be empty")
+	if location == "" {
+		return nil, fmt.Errorf("location cannot be empty")
 	}
-	if deployedIndexID == "" {
-		return nil, fmt.Errorf("Deployed Index ID cannot be empty")
+	if collectionID == "" {
+		return nil, fmt.Errorf("collection ID cannot be empty")
 	}
 
-	// Initialize the official AI Platform MatchClient
-	gClient, err := aiplatform.NewMatchClient(ctx, option.WithEndpoint(apiEndpoint))
+	// Retrieve OIDC authenticated HTTP Client automatically
+	httpClient, err := google.DefaultClient(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Google MatchClient: %w", err)
+		return nil, fmt.Errorf("failed to create Google HTTP client: %w", err)
 	}
 
 	return &vectorClient{
-		matchClient:     gClient,
-		indexEndpoint:   indexEndpoint,
-		deployedIndexID: deployedIndexID,
+		httpClient:   httpClient,
+		projectID:    projectID,
+		location:     location,
+		collectionID: collectionID,
+		baseURL:      "https://vectorsearch.googleapis.com",
 	}, nil
 }
 
-// FindNeighbors searches for nearest neighbors of a given feature vector.
-func (vc *vectorClient) FindNeighbors(ctx context.Context, vector []float32, neighborCount int) ([]SearchResult, error) {
-	if len(vector) == 0 {
-		return nil, fmt.Errorf("feature vector cannot be empty")
+// Request schemas for Search
+type searchRequest struct {
+	SemanticSearch semanticSearchQuery `json:"semantic_search"`
+}
+
+type semanticSearchQuery struct {
+	SearchField string `json:"search_field"`
+	Query       string `json:"query"`
+	TopK        int    `json:"top_k"`
+}
+
+// Response schemas for Search
+type searchResponse struct {
+	Results []searchResultItem `json:"results"`
+}
+
+type searchResultItem struct {
+	DataObject dataObjectItem `json:"dataObject"`
+	Distance   float64        `json:"distance"`
+}
+
+type dataObjectItem struct {
+	Name string         `json:"name"`
+	Data dataObjectData `json:"data"`
+}
+
+type dataObjectData struct {
+	Path        string `json:"path"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+// Search performs a semantic query against Vector Search 2.0 Collection.
+func (vc *vectorClient) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	if query == "" {
+		return nil, fmt.Errorf("query text cannot be empty")
 	}
-	if neighborCount <= 0 {
-		neighborCount = 10
+	if limit <= 0 {
+		limit = 5
 	}
 
-	req := &aiplatformpb.FindNeighborsRequest{
-		IndexEndpoint:   vc.indexEndpoint,
-		DeployedIndexId: vc.deployedIndexID,
-		Queries: []*aiplatformpb.FindNeighborsRequest_Query{
-			{
-				Datapoint: &aiplatformpb.IndexDatapoint{
-					FeatureVector: vector,
-				},
-				NeighborCount: int32(neighborCount),
-			},
+	reqBody := searchRequest{
+		SemanticSearch: semanticSearchQuery{
+			SearchField: "asset_embedding",
+			Query:       query,
+			TopK:        limit,
 		},
 	}
 
-	resp, err := vc.matchClient.FindNeighbors(ctx, req)
+	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query nearest neighbors: %w", err)
+		return nil, fmt.Errorf("failed to marshal search request: %w", err)
+	}
+
+	// Vector Search 2.0 collections search REST endpoint:
+	// POST https://vectorsearch.googleapis.com/v1beta/projects/{project}/locations/{location}/collections/{collection}/dataObjects:search
+	apiURL := fmt.Sprintf("%s/v1beta/projects/%s/locations/%s/collections/%s/dataObjects:search",
+		vc.baseURL, vc.projectID, vc.location, vc.collectionID)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct HTTP request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := vc.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP call failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBytes))
+	}
+
+	var response searchResponse
+	if err := json.Unmarshal(respBytes, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse search JSON response: %w", err)
 	}
 
 	var results []SearchResult
-	for _, nearest := range resp.NearestNeighbors {
-		for _, neighbor := range nearest.Neighbors {
-			if neighbor != nil && neighbor.Datapoint != nil {
-				results = append(results, SearchResult{
-					ID:       neighbor.Datapoint.DatapointId,
-					Distance: neighbor.Distance,
-				})
-			}
+	for _, r := range response.Results {
+		// Extract standard ID from the resource name path (projects/*/locations/*/collections/*/dataObjects/ID)
+		parts := bytes.Split([]byte(r.DataObject.Name), []byte("/dataObjects/"))
+		id := r.DataObject.Name
+		if len(parts) == 2 {
+			id = string(parts[1])
 		}
+
+		results = append(results, SearchResult{
+			ID:          id,
+			Path:        r.DataObject.Data.Path,
+			Type:        r.DataObject.Data.Type,
+			Description: r.DataObject.Data.Description,
+			Distance:    r.Distance,
+		})
 	}
 
 	return results, nil
 }
 
-// Close closes the underlying MatchClient connection.
+// Close satisfies the Client interface.
 func (vc *vectorClient) Close() error {
-	return vc.matchClient.Close()
+	// The shared default HTTP client doesn't need manual connection closing.
+	return nil
 }

@@ -11,17 +11,16 @@ The platform consists of a structured CLI runner that bootstraps the central orc
 ```mermaid
 graph TB
     subgraph Developer Environment
-        CLI[Game Assist CLI]
+        CLI[Game Assist CLI: cmd/game-assist]
     end
 
     subgraph GCP Project [Autonomous Game Assist Platform]
         subgraph Orchestration & Execution
-            Runner[Agent Runner Process]
+            Runner[Agent Runner Process: GKE Job]
             ADK[ADK Orchestrator]
         end
 
         subgraph GenAI & Search Services
-            GeminiEnterpriseAgentPlatform[Gemini Enterprise Agent Platform AI Platform]
             Gemini[Gemini 3.1 Pro / Flash Models]
             VectorSearch[Gemini Enterprise Agent Platform Vector Search Endpoint]
         end
@@ -37,8 +36,13 @@ graph TB
         end
     end
 
+    subgraph External Services
+        GitHub[GitHub VCS Server]
+    end
+
     %% Inputs
-    CLI -->|High-level Sound Request| Runner
+    CLI -->|Dispatch GKE Job| Runner
+    CLI -.->|Download Assets| GCS
     
     %% Orchestration
     Runner -->|Bootstrap Session| ADK
@@ -47,6 +51,7 @@ graph TB
     ADK -->|3. Generate Script| UnrealAgent[Unreal Agent]
     ADK -->|4. Execute & Validate| ValidationAgent[Validation Agent]
     ADK -->|5. Upload Deliverables| GCSUploader[GCS Uploader Agent]
+    ADK -->|6. Create PR| PRAgent[Pull Request Agent]
 
     %% Services
     PromptCrafter -->|Inference| Gemini
@@ -55,9 +60,10 @@ graph TB
     UnrealAgent -->|Inference| Gemini
     ValidationAgent -->|Local Process Sandbox| LocalSandbox[Local Sandbox Subprocess]
     GCSUploader -->|Upload WAV & PY| GCS
+    PRAgent -->|Clone, Push & Create PR| GitHub
     
     %% Security
-    Runner -->|Resolve API Keys| SecretManager
+    Runner -->|Resolve API Keys & tokens| SecretManager
     
     %% Telemetry
     ADK -.->|Trace Context Propagation| CloudTrace
@@ -88,6 +94,10 @@ graph TB
 ### 2.5 Delivery & Storage (Cloud Storage)
 * **Google Cloud Storage (GCS)**: Acts as the secure, enterprise game asset delivery bucket, storing final synthesized Foley WAV files and validated level automation scripts using session-keyed paths (`audio/foley_{session_id}.wav` and `scripts/unreal_assist_{session_id}.py`).
 
+### 2.6 Pull Request Agent (Human-in-the-Loop Review)
+* **GitHub Pull Request Integration**: Automates Git checkout, branching, committing the generated and sandboxed script file directly into a newly created git branch on the target remote, and issuing an OIDC-authorized API request to GitHub to open a PR for manual code approval.
+* **Direct Review Hyperlinks**: Dynamically injects GCS signed/public download URLs inside the pull request body description, enabling code reviewers to download and listen to the generated sound effect immediately before approving the code integration.
+
 ---
 
 ## 3. Observability & Distributed Tracing
@@ -111,7 +121,7 @@ To ensure full operational transparency and debugging capabilities, the platform
 * **Least Privilege Access Control (IAM)**: 
   * **Storage**: Service Account requires `roles/storage.objectCreator` to upload final deliverables.
   * **AI & Vector Search**: Requires `roles/aiplatform.user` to trigger LLM reasoning and vector index lookups.
-  * **Secret Manager**: Requires `roles/secretmanager.secretAccessor` on target secrets.
+  * **Secret Manager**: Requires `roles/secretmanager.secretAccessor` on target secrets (Gemini API keys and GitHub CI/CD personal access tokens).
   * **Telemetry**: Requires `roles/cloudtrace.agent` to export traces to Google Cloud Trace.
 * **Workload Identity**: Avoids hardcoded credentials by mapping Kubernetes Service Accounts (KSA) directly to Google Service Accounts (GSA).
 * **FinOps Alignment**: Emits custom tracking labels (`environment`, `owner`, `cost-center`, and `managed-by`) to allow precise GCP billing analytics.
