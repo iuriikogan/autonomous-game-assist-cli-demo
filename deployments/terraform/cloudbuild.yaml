@@ -1,0 +1,47 @@
+# Cloud Build CI/CD Pipeline for Game Assist Infrastructure Deployment
+# Enforces syntax validation, PoLP compliance, and IaC security scanning.
+
+steps:
+  # Step 1: Initialize Terraform
+  - name: 'hashicorp/terraform:1.5.7'
+    id: 'terraform-init'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        terraform init -backend=false
+
+  # Step 2: Validate Terraform Configuration Syntax
+  - name: 'hashicorp/terraform:1.5.7'
+    id: 'terraform-validate'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        terraform validate
+
+  # Step 3: Scan Infrastructure-as-Code for vulnerabilities and misconfigurations using Trivy
+  - name: 'aquasec/trivy:0.45.1'
+    id: 'iac-security-scan'
+    entrypoint: 'trivy'
+    args:
+      - 'config'
+      - '--exit-code'
+      - '1' # Fail the build if high/critical vulnerabilities are found
+      - '--severity'
+      - 'HIGH,CRITICAL'
+      - '.'
+
+  # Step 4: Dry-Run Plan (triggered on non-main branch or pull requests)
+  - name: 'hashicorp/terraform:1.5.7'
+    id: 'terraform-plan'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        # In actual pipelines, you would supply credentials or use the WIF service account.
+        # This runs a syntax check planning step.
+        terraform plan -lock=false -var="project_id=dummy-project-id" -var="gke_cluster_name=dummy-cluster" -var="region=us-central1"
+
+options:
+  logging: CLOUD_LOGGING
