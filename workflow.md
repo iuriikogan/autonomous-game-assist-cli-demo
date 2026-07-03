@@ -6,7 +6,7 @@ This document outlines the step-by-step sequential processing workflow of the Au
 
 ## 1. Core Execution Flow
 
-When a game developer triggers the CLI with a high-level request (e.g., `game-assist --prompt "footsteps on metal floor"`), the Central Coordinator orchestrates five cooperative agents in a strict sequential order to expand, synthesize, discover, validate, and deliver resources.
+When a game developer triggers the CLI with a high-level request (e.g., `./game-assist generate "Integrate existing metal footstep sound effect on trigger overlap"`), the Central Coordinator orchestrates six cooperative agent steps in sequence to expand metadata, select audio assets, query Blueprint indexes, validate integration scripts, and deliver PRs.
 
 ```mermaid
 sequenceDiagram
@@ -27,14 +27,14 @@ sequenceDiagram
 
     Dev->>CLI: game-assist generate --prompt "[WAV integration request]"
     activate CLI
-    CLI->>Runner: Deploy GKE Job
+    CLI->>Runner: Deploy GKE Sandbox Job
     activate Runner
-    Runner->>Coordinator: Start execution
+    Runner->>Coordinator: Start execution session
     activate Coordinator
-    Note over Coordinator: Create Trace: "game-assist-workflow"
+    Note over Coordinator: Start Trace: "game-assist-workflow"
 
-    %% Step 1: Prompt Expansion
-    Coordinator->>PC: Trigger Expansion
+    %% Step 1: Prompt Expansion & Acoustic Metadata
+    Coordinator->>PC: Trigger Metadata Expansion
     activate PC
     Note over PC: Start Span: "prompt_crafter_run"
     PC->>PC: Extract WAV asset intent & target level context
@@ -97,64 +97,54 @@ sequenceDiagram
 
     Coordinator-->>Runner: Workflow Complete
     deactivate Coordinator
-    Runner-->>CLI: Complete
+    Runner-->>CLI: Job finished
     deactivate Runner
-    CLI-->>Dev: Prints PR URL & GCS paths
+    CLI-->>Dev: Print PR URL & GCS Asset URIs
     deactivate CLI
 ```
-
----
 
 ## 2. Sub-Agent Operations and State Transitions
 
 ### 2.1 Central Coordinator Agent
 * **Type**: Orchestrator (`sequentialagent`)
-* **State Inputs**: The raw developer prompt from the command-line interface.
-* **Responsibility**: Initializes individual sub-agents and executes them in the defined sequence, passing the active session state containing intermediate variables from one agent to the next.
+* **State Inputs**: Developer natural language prompt from `game-assist`.
+* **Responsibility**: Manages session variables, coordinates sub-agent execution, and propagates OpenTelemetry trace contexts.
 
 ### 2.2 Prompt Crafter Agent
 * **Type**: Reasoner (`llmagent` using Gemini 3.1 Pro)
 * **State Output**: `foley_description` (string)
-* **Instruction Outline**: Expands simple prompts into highly descriptive paragraphs containing physical properties, materials (e.g., iron plates, sand, foliage), speeds, impact forces, reverberation, and acoustics to maximize Gemini's foley synthesis capability.
+* **Instruction**: Expands developer request into detailed acoustic dynamics, materials (steel, sand, foliage), impact velocities, and reverberation metadata.
 
-### 2.3 Creative Audio Agent
-* **Type**: Multimodal Generator (`llmagent` using Gemini 3.1 Pro)
+### 2.3 Audio Asset Selector
+* **Type**: Asset Resolver (`coordinator.assetSelector`)
 * **State Input**: `foley_description`
-* **State Output**: `audio_binary` (binary WAV bytes)
-* **Synthesis Detail**: Instructs Gemini to output natively formatted WAV bytes corresponding to the expanded foley dynamics. Avoids secondary external sound libraries.
+* **State Output**: `audio_asset_uri` (string)
+* **Instruction**: Identifies and selects the best matching pre-existing Foley sound asset from the central sound repository.
 
 ### 2.4 Unreal Agent
-* **Type**: Semantic Integration Coder (`llmagent` using Gemini 3.1 Pro)
-* **Equipped Tool**: `vector_search`
-* **State Output**: `unreal_script` (raw Python code string)
-* **Discovery Detail**: Uses the Vector Search tool to query existing game levels, character actor class names, and blueprint locations, then generates standard Python scripts to programmatically link the synthesized foley audio file into active UE5 levels.
+* **Type**: Integration Coder (`llmagent` using Gemini 3.1 Pro)
+* **Tool**: `vector_search`
+* **State Output**: `unreal_script` (Python string)
+* **Instruction**: Queries **Vertex AI Vector Search 2.0 Collections** to discover target Level Blueprints and actor classes, generating a Python script to link the selected Foley sound asset to UE5 trigger volumes.
 
-### 2.5 Validation Agent & Sandbox Self-Correction Loop
+### 2.5 Validation Agent & Auto-Correction Loop
 * **Type**: Quality Assurance Coder (`llmagent` using Gemini 3.1 Pro)
-* **Equipped Tool**: `sandbox_tool`
+* **Tool**: `sandbox_tool`
 * **State Input**: `unreal_script`
-* **State Output**: `validated_script` (raw validated Python code string)
-* **The Self-Correction Loop**:
-  1. Receives raw script. Calls the isolated `sandbox_tool` subprocess runner to validate it.
-  2. Inspects exit status and error diagnostics (`stderr`).
-  3. If compilation or runtime failures occur, the agent is instructed to rewrite the script, fixing the syntax or incorrect level APIs.
-  4. Re-runs validation. The loop runs up to a maximum of 3 times. If still unresolved, it marks the workflow state as `VALIDATION_FAILED`.
+* **State Output**: `validated_script` (Python string)
+* **Loop Logic**:
+  1. Executes script in isolated subprocess sandbox.
+  2. Evaluates exit status and `stderr`.
+  3. Rewrites script upon syntax or API errors (maximum 3 iterations).
 
 ### 2.6 GCS Uploader Agent
-* **Type**: Custom System Agent (`coordinator.gcsUploader`)
-* **State Inputs**: `audio_binary`, `validated_script`
-* **Delivery Output**: gs:// URL paths
-* **Storage Detail**: Generates UUID/session-keyed storage paths, executes secure uploads to Cloud Storage, and emits the final delivery receipt.
+* **Type**: Storage System Agent (`coordinator.gcsUploader`)
+* **State Inputs**: `audio_asset_uri`, `validated_script`
+* **State Output**: `gs://` delivery paths
+* **Instruction**: Uploads validated script and Foley audio asset under session-keyed storage locations.
 
 ### 2.7 Pull Request Agent
-* **Type**: Custom Git/API Agent (`pr.Agent` using GitHub OIDC credential authentication)
-* **State Inputs**: `validated_script` (string), `audio_gcs_uri` (string), `script_gcs_uri` (string), `prompt` (string), `foley_description` (string)
-* **State Output**: Dynamic Pull Request landing URL.
-* **Process Details**:
-  1. Fetches authorized personal access token from Google Secret Manager.
-  2. Initiates ephemeral `/tmp` workspace clone.
-  3. Creates a target branch named `foley-assist-{session_id}`.
-  4. Saves the final validated Python script under `content/scripts/unreal_assist_{session_id}.py`.
-  5. Commits and pushes changes to `origin`.
-  6. Forms a rich markdown review ticket linking both direct GCS synthesized audio and script review locations.
-  7. Dispatches a GitHub Pulls API request to open the PR for reviewer inspection.
+* **Type**: Git Integration Agent (`pr.Agent`)
+* **State Inputs**: `validated_script`, `audio_gcs_uri`, `script_gcs_uri`, `prompt`
+* **State Output**: GitHub Pull Request URL
+* **Instruction**: Clones repository, creates feature branch `foley-assist-{session_id}`, commits the script to `content/scripts/`, and dispatches GitHub API call to open PR with direct GCS download links.

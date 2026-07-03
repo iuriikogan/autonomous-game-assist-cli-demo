@@ -6,12 +6,13 @@ This document provides a comprehensive overview of the enterprise-grade architec
 
 ## 1. Component Architecture
 
-The platform consists of a structured CLI runner that bootstraps the central orchestrator and coordinates high-fidelity multimodal synthesis, semantic index retrieval, sandboxed validation, and secure delivery.
+The platform consists of a structured CLI suite that populates semantic search collections, dispatches execution jobs to isolated GKE sandboxes, and coordinates high-fidelity Foley audio selection, Blueprint retrieval, sandboxed Python code validation, and pull request delivery.
 
 ```mermaid
 graph TB
     subgraph Developer Environment
         CLI[Game Assist CLI: cmd/game-assist]
+        Indexer[Vector Indexer: cmd/vector-indexer]
     end
 
     subgraph GCP Project [Autonomous Game Assist Platform]
@@ -22,7 +23,7 @@ graph TB
 
         subgraph GenAI & Search Services
             Gemini[Gemini 3.1 Pro / Flash Models]
-            VectorSearch[Gemini Enterprise Agent Platform Vector Search Endpoint]
+            VectorSearch[Vertex AI Vector Search 2.0 Collection]
         end
 
         subgraph Storage & Security
@@ -40,9 +41,12 @@ graph TB
         GitHub[GitHub VCS Server]
     end
 
+    %% Ingestion
+    Indexer -->|Dense Vector Embeddings| VectorSearch
+
     %% Inputs
     CLI -->|Dispatch GKE Job| Runner
-    CLI -.->|Download Assets| GCS
+    CLI -.->|Download Assets & Scripts| GCS
     
     %% Orchestration
     Runner -->|Bootstrap Session| ADK
@@ -62,7 +66,7 @@ graph TB
 
     
     %% Security
-    Runner -->|Resolve API Keys & tokens| SecretManager
+    Runner -->|Resolve API Keys & Tokens| SecretManager
     
     %% Telemetry
     ADK -.->|Trace Context Propagation| CloudTrace
@@ -75,52 +79,46 @@ graph TB
 ## 2. Core System Components & GCP Integration
 
 ### 2.1 Central Orchestration
-* **Agent Development Kit (ADK)**: Acts as the runtime execution framework, orchestrating the execution order, managing sequential session states, and propagating context across agent execution boundaries.
-* **Agent Runner**: Bootstrapped inside containerized execution runtimes (such as GKE Autopilot or Cloud Run), resolving system secrets from Secret Manager, configuring dependencies, and triggering execution sessions.
+* **Agent Development Kit (ADK)**: Framework managing sequential execution flow, intermediate state variables, and context propagation across agent boundaries.
+* **Agent Runner (`cmd/agent-runner`)**: Bootstrapped inside containerized GKE gVisor runtimes, resolving secrets from Secret Manager, initializing dependencies, and executing orchestration workflows.
+
+### 2.2 Large Language Models
+* **Gemini 3.1 Pro**: Core reasoning engine driving prompt expansion, Unreal Engine Python script generation, vector query synthesis, and sandbox dry-run auto-correction.
+* **Gemini 3.1 Flash**: Deployed for lightweight, latency-critical operations.
 
 ### 2.2 Large Language Models & Multimodal AI
 * **Gemini 3.1 Pro**: Leveraged as the heavy reasoning core for the central coordinator, Unreal Agent, and Validation Agent to handle prompt structural expansion, Python code generation, and dry-run self-correction.
 * **Gemini 3.1 Flash**: Used for lightweight, latency-critical subtasks.
 * **Vector Search 2.0**: Used as a multi-modal semantic search layer
 
-### 2.3 Semantic Asset Discovery (Gemini Enterprise Agent Platform Vector Search)
-* **Gemini Enterprise Agent Platform Vector Search (Matching Engine)**: Performs real-time, high-scale approximate nearest neighbor (ANN) semantic queries against pre-built asset collections.
-* **Text Embeddings API**: Converts natural language queries into semantic dense vectors to enable precise matching inside Vector Search.
+### 2.4 Pre-Existing Foley Asset Selection & Management
+* **Audio Asset Selector**: Resolves pre-existing Foley sound effects from target storage repositories, mapping expanded acoustic metadata (materials, speeds, dynamics) to appropriate sound assets without live audio generation.
 
-### 2.4 Sandboxed Local Subprocesses
-* **Local Process Sandbox**: Isolates the dry-run execution of generated Unreal Engine Python and C++ scripts inside local subprocess environments, capturing exits, exit codes, compilation warnings, and standard error output without risking the host system.
+### 2.5 Sandboxed Local Subprocesses
+* **Subprocess Sandbox**: Dry-runs generated Unreal Engine 5 Python automation scripts in isolated sub-processes, capturing compilation errors, exit codes, and diagnostics for iterative auto-correction.
 
-### 2.5 Delivery & Storage (Cloud Storage)
-* **Google Cloud Storage (GCS)**: Acts as the secure, enterprise game asset delivery bucket, storing final synthesized Foley WAV files and validated level automation scripts using session-keyed paths (`audio/foley_{session_id}.wav` and `scripts/unreal_assist_{session_id}.py`).
+### 2.6 Delivery & Storage (Cloud Storage)
+* **Google Cloud Storage (GCS)**: Stores selected Foley sound assets and validated Python automation scripts under session-keyed paths (`audio/foley_{session_id}.wav` and `scripts/unreal_assist_{session_id}.py`).
 
-### 2.6 Pull Request Agent (Human-in-the-Loop Review)
-* **GitHub Pull Request Integration**: Automates Git checkout, branching, committing the generated and sandboxed script file directly into a newly created git branch on the target remote, and issuing an OIDC-authorized API request to GitHub to open a PR for manual code approval.
-* **Direct Review Hyperlinks**: Dynamically injects GCS signed/public download URLs inside the pull request body description, enabling code reviewers to download and listen to the generated sound effect immediately before approving the code integration.
+### 2.7 Pull Request Agent (Human-in-the-Loop Review)
+* **GitHub Pull Request Integration**: Authenticates via GitHub Personal Access Tokens stored in Secret Manager, clones repository branches, commits integration scripts, and opens PRs containing direct asset download links.
 
 ---
 
 ## 3. Observability & Distributed Tracing
 
-To ensure full operational transparency and debugging capabilities, the platform implements comprehensive distributed tracing using **OpenTelemetry (OTel)** APIs and exports telemetry directly to **Google Cloud Trace**.
-
-### 3.1 Context Propagation
-* The platform uses standard OpenTelemetry context propagation (`propagation.TraceContext` and `propagation.Baggage`). 
-* The root trace span (`game-assist-workflow`) is started by the CLI runner. 
-* This context is passed to the ADK Orchestrator, which propagates the parent span context down to every sub-agent execution run and tool invocation.
-
-### 3.2 OpenTelemetry Telemetry Mapping
-* **ADK Instrumentation**: The framework automatically records agent execution latency, system inputs, LLM prompt lengths, token usages, and execution statuses.
-* **Vector Search Tool Spans**: Explicit spans (`vector_search_tool`) are started for asset discovery, recording search queries and return limits as semantic search metadata attributes.
-* **Sandbox Execution Spans**: Explicit spans (`sandbox_execution_tool`) capture code compilation and run outcome details, recording script language, subprocess execution statuses, and return codes.
+* **OpenTelemetry Context Propagation**: Propagates `TraceContext` and `Baggage` across agent steps under root span `game-assist-workflow`.
+* **Google Cloud Trace**: Exports telemetry spans for agent latencies, vector retrieval queries, and sandbox validation runs.
 
 ---
 
-## 4. Security & Cost Governance (Principle of Least Privilege)
+## 4. Resource Governance & FinOps Compliance
 
-* **Least Privilege Access Control (IAM)**: 
-  * **Storage**: Service Account requires `roles/storage.objectCreator` to upload final deliverables.
-  * **AI & Vector Search**: Requires `roles/aiplatform.user` to trigger LLM reasoning and vector index lookups.
-  * **Secret Manager**: Requires `roles/secretmanager.secretAccessor` on target secrets (Gemini API keys and GitHub CI/CD personal access tokens).
-  * **Telemetry**: Requires `roles/cloudtrace.agent` to export traces to Google Cloud Trace.
-* **Workload Identity**: Avoids hardcoded credentials by mapping Kubernetes Service Accounts (KSA) directly to Google Service Accounts (GSA).
-* **FinOps Alignment**: Emits custom tracking labels (`environment`, `owner`, `cost-center`, and `managed-by`) to allow precise GCP billing analytics.
+All provisioned infrastructure and vector collections enforce standardized labels:
+
+| Label | Description | Allowed Values / Pattern |
+| :--- | :--- | :--- |
+| `environment` | Deployment stage | `dev`, `staging`, `prod` |
+| `owner` | Responsible user or team handle | e.g. `ikogan` |
+| `cost-center` | Accounting budget allocation | e.g. `gaming-assist-ai` |
+| `managed-by` | IaC or automation tool | `terraform`, `vector-indexer` |
