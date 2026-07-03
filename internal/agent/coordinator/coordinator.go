@@ -32,6 +32,7 @@ type Config struct {
 	GitHubOwner         string
 	GitHubRepo          string
 	BaseBranch          string
+	MockAudio           bool
 }
 
 // New creates the Central Coordinator sequential agent workflow.
@@ -65,6 +66,24 @@ func New(cfg Config) (agent.Agent, error) {
 	}
 
 	// 1. Construct sub-agents
+<<<<<<< HEAD
+=======
+	promptCrafter, err := promptcrafter.New(cfg.Model)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct Prompt Crafter: %w", err)
+	}
+
+	var creativeAudio agent.Agent
+	if cfg.MockAudio {
+		creativeAudio, err = audio.NewMock()
+	} else {
+		creativeAudio, err = audio.New(cfg.Model)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct Creative Audio: %w", err)
+	}
+
+>>>>>>> e0badb4f3e09d5cb53a52192b71766eba6a7f0b5
 	unrealAgent, err := unreal.New(cfg.Model, cfg.VectorSearchTool)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct Unreal Agent: %w", err)
