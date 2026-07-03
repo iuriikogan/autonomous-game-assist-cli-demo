@@ -81,7 +81,7 @@ graph TB
 ### 2.2 Large Language Models & Multimodal AI
 * **Gemini 3.1 Pro**: Leveraged as the heavy reasoning core for the central coordinator, Unreal Agent, and Validation Agent to handle prompt structural expansion, Python code generation, and dry-run self-correction.
 * **Gemini 3.1 Flash**: Used for lightweight, latency-critical subtasks.
-* **Multimodal Audio Native Synthesis**: The Creative Audio Agent relies on Gemini's native `audio/wav` response MIME type and the `Aoede` voice preset to generate raw WAV game asset effects directly, avoiding separate text-to-speech pipelines.
+* **Vector Search 2.0**: Used as a multi-modal semantic search layer
 
 ### 2.3 Semantic Asset Discovery (Gemini Enterprise Agent Platform Vector Search)
 * **Gemini Enterprise Agent Platform Vector Search (Matching Engine)**: Performs real-time, high-scale approximate nearest neighbor (ANN) semantic queries against pre-built asset collections.
