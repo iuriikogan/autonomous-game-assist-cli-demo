@@ -1,6 +1,6 @@
 # Autonomous Game Assist CLI & Platform
 
-An enterprise-grade, cloud-native AI agent suite built in Go using the Google ADK (Agent Development Kit) framework and **Gemini 3.1 Pro**, featuring automated multimodal Foley asset synthesis, Level Blueprint semantic retrieval via **Vertex AI Vector Search 2.0**, gVisor-sandboxed script execution, and automated GitHub Pull Request reviews.
+An enterprise-grade, cloud-native AI agent suite built in Go using the Google ADK (Agent Development Kit) framework and **Gemini 3.1 Pro**, featuring automated Foley asset selection and acoustic metadata mapping, Level Blueprint semantic retrieval via **Vertex AI Vector Search 2.0**, gVisor-sandboxed script execution, and automated GitHub Pull Request reviews.
 
 ## High-Level Architecture
 
@@ -12,18 +12,17 @@ graph TD
     
     subgraph Coordinator Workflow
         direction TB
-        P1[Prompt Crafter Agent] -->|1. Expand Foley Description| P2[Creative Audio Agent]
-        P2 -->|2. Synthesize Native WAV Audio| P3[Unreal Agent]
+        P1[Prompt Crafter Agent] -->|1. Expand Foley Acoustic Metadata| P2[Audio Asset Selector Agent]
+        P2 -->|2. Map Pre-Existing Foley Assets| P3[Unreal Agent]
         P3 -->|3. Semantic Discovery via Vector Search 2.0| P3
         P3 -->|4. Generate UE5 Python Script| P4[Validation Agent]
         P4 -->|5. Dry-Run Subprocess Sandbox| P4
         P4 -->|6. Verify & Auto-Correct Loop| P5[GCS Uploader Agent]
-        P5 -->|7. Upload WAV & Script Deliverables| P6[Pull Request Agent]
+        P5 -->|7. Secure WAV Asset & Script URIs| P6[Pull Request Agent]
         P6 -->|8. Commit & Open PR| GH[GitHub Repository]
     end
     
     P1 -->|Gemini 3.1 Pro| VertexAI[Vertex AI Platform]
-    P2 -->|Multimodal WAV Generation| VertexAI
     P3 -->|Vector Collection Query| GVS[Vertex AI Vector Search 2.0]
     P5 -->|Asset Storage| GCS[Google Cloud Storage]
     Runner -->|Trace Context| CloudTrace[Google Cloud Trace]
@@ -82,18 +81,18 @@ go build -o vector-indexer ./cmd/vector-indexer
 ```
 
 ### 2. Local Developer CLI (`cmd/game-assist`)
-Used by game developers to submit natural language generation jobs to the GKE sandbox runtime and download finalized deliverables:
+Used by game developers to submit natural language integration requests to the GKE sandbox runtime and download finalized deliverables:
 
 ```bash
 # Build CLI
 go build -o game-assist ./cmd/game-assist
 
 # Dispatch job to GKE sandbox
-./game-assist generate "Generate metal footstep sound links on trigger overlap" \
+./game-assist generate "Integrate existing metal footstep sound effect on trigger overlap" \
   --user "dev_ikogan" \
   --image "${GCP_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/autonomous-game-assist/agent-runner:latest"
 
-# Download synthesized WAV sound and Python integration script
+# Download selected WAV sound asset and Python integration script
 ./game-assist download \
   --session "session-1713919121" \
   --bucket "${GCS_BUCKET}" \
@@ -108,7 +107,7 @@ The central execution engine triggered as a containerized job on GKE under gViso
 go build -o agent-runner ./cmd/agent-runner
 
 # Run directly (requires local ADC or active credentials)
-./agent-runner -prompt "Generate metal footstep sound links on trigger overlap"
+./agent-runner -prompt "Integrate existing metal footstep sound effect on trigger overlap"
 ```
 
 ## Docker Compilation & Artifact Registry
