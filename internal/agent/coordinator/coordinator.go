@@ -14,13 +14,10 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 
-	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/audio"
 	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/pr"
-	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/promptcrafter"
 	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/unreal"
 	"github.com/iuriikogan/autonomous-game-assist-cli/internal/agent/validation"
 	"github.com/iuriikogan/autonomous-game-assist-cli/pkg/gcp"
-
 )
 
 // Config holds all dependencies and configurations for bootstrapping the coordinator workflow.
@@ -68,16 +65,6 @@ func New(cfg Config) (agent.Agent, error) {
 	}
 
 	// 1. Construct sub-agents
-	promptCrafter, err := promptcrafter.New(cfg.Model)
-	if err != nil {
-		return nil, fmt.Errorf("failed to construct Prompt Crafter: %w", err)
-	}
-
-	creativeAudio, err := audio.New(cfg.Model)
-	if err != nil {
-		return nil, fmt.Errorf("failed to construct Creative Audio: %w", err)
-	}
-
 	unrealAgent, err := unreal.New(cfg.Model, cfg.VectorSearchTool)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct Unreal Agent: %w", err)
@@ -108,10 +95,8 @@ func New(cfg Config) (agent.Agent, error) {
 	seqConfig := sequentialagent.Config{
 		AgentConfig: agent.Config{
 			Name:        "central_coordinator",
-			Description: "Orchestrates Prompt Crafter, Creative Audio, Unreal Agent, Validation Agent, GCS Uploader, and Pull Request Agent.",
+			Description: "Orchestrates Unreal Agent, Validation Agent, GCS Uploader, and Pull Request Agent.",
 			SubAgents: []agent.Agent{
-				promptCrafter,
-				creativeAudio,
 				unrealAgent,
 				validationAgent,
 				gcsUploader,
