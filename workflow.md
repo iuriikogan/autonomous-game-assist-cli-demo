@@ -16,17 +16,16 @@ sequenceDiagram
     participant Runner as Agent Runner (GKE Job)
     participant Coordinator as Central Coordinator Agent
     participant PC as Prompt Crafter Agent
-    participant AS as Audio Asset Selector
-    participant UA as Unreal Agent
+    participant UA as Unreal C++ Agent
     participant VA as Validation Agent
-    participant VS as Vector Search 2.0
-    participant SB as Sandbox Subprocess
+    participant VS as Multi-Modal Vector Search Tool
+    participant SB as Sandbox Tool (g++ & Smoke Harness)
     participant Uploader as GCS Uploader Agent
     participant GCS as Cloud Storage
     participant PR as Pull Request Agent
     participant GH as GitHub API
 
-    Dev->>CLI: game-assist generate --prompt "[request]"
+    Dev->>CLI: game-assist generate --prompt "[WAV integration request]"
     activate CLI
     CLI->>Runner: Deploy GKE Sandbox Job
     activate Runner
@@ -38,69 +37,60 @@ sequenceDiagram
     Coordinator->>PC: Trigger Metadata Expansion
     activate PC
     Note over PC: Start Span: "prompt_crafter_run"
-    PC->>PC: Expand acoustic dynamics & material parameters (Gemini 3.1 Pro)
-    PC-->>Coordinator: foley_description & acoustic metadata
+    PC->>PC: Extract WAV asset intent & target level context
+    PC-->>Coordinator: Rich level_integration_description
     deactivate PC
 
-    %% Step 2: Foley Audio Asset Selection
-    Coordinator->>AS: Trigger Asset Matching
-    activate AS
-    Note over AS: Start Span: "audio_asset_selector_run"
-    AS->>GCS: Map & select matching pre-existing Foley sound asset
-    GCS-->>AS: Foley sound asset URI / metadata
-    AS-->>Coordinator: Selected Foley sound asset details
-    deactivate AS
-
-    %% Step 3: Script generation with semantic context
-    Coordinator->>UA: Trigger Script Generation
+    %% Step 2: C++ Code Generation with Multi-Modal Vector Context
+    Coordinator->>UA: Trigger C++ Code Gen
     activate UA
     Note over UA: Start Span: "unreal_agent_run"
-    UA->>VS: Query collection for matching Level Blueprints
+    UA->>VS: Query multi-modal index for base C++ level classes & WAV metadata
     activate VS
     Note over VS: Start Span: "vector_search_tool"
-    VS-->>UA: Nearest neighbor Blueprint paths
+    VS-->>UA: Base C++ class structure & WAV asset paths
     deactivate VS
-    UA->>UA: Generate UE5 Python integration script (Gemini 3.1 Pro)
-    UA-->>Coordinator: Generated script (unreal_script)
+    UA->>UA: Write Unreal C++ level actor code additions
+    UA-->>Coordinator: C++ code additions (unreal_script)
     deactivate UA
 
-    %% Step 4: Subprocess Sandbox Dry-Run with Self-Correction
-    Coordinator->>VA: Trigger Validation
+    %% Step 3: Sandboxed Compilation & Mock Smoke Test Validation
+    Coordinator->>VA: Trigger C++ Validation
     activate VA
     Note over VA: Start Span: "validation_agent_run"
     
-    loop Dry-run & Auto-Correction (up to 3 attempts)
-        VA->>SB: Execute Python script in isolated subprocess sandbox
+    loop Sandboxed C++ Compile & Smoke Test (up to 3 attempts)
+        VA->>SB: Execute g++ compilation & mock smoke test harness
         activate SB
         Note over SB: Start Span: "sandbox_execution_tool"
-        SB-->>VA: Exit code & stderr diagnostics
+        SB-->>VA: Exit code, stdout/smoke test results, stderr
         deactivate SB
-        alt execution fails
-            VA->>VA: Rewrite script addressing stderr diagnostics
+        alt compile / smoke test fails
+            VA->>VA: Rewrite C++ code additions based on stderr/test logs
         else success
-            Note over VA: Exit loop immediately on success
+            Note over VA: All 3/3 mock smoke tests PASSED
         end
     end
     
     VA-->>Coordinator: validated_script
     deactivate VA
 
-    %% Step 5: Secure Delivery to Cloud Storage
-    Coordinator->>Uploader: Trigger Delivery Upload
+    %% Step 4: Staging Deliverables to Cloud Storage
+    Coordinator->>Uploader: Trigger Staging
     activate Uploader
     Note over Uploader: Start Span: "gcs_uploader_run"
-    Uploader->>GCS: Upload selected Foley sound asset and validated Python script
+    Uploader->>GCS: Stage target WAV files and metadata
     Uploader-->>Coordinator: Asset GCS URIs
     deactivate Uploader
 
-    %% Step 6: GitHub Pull Request Delivery
-    Coordinator->>PR: Trigger Pull Request Agent
+    %% Step 5: Git Diff Application & Detailed PR Comment Creation
+    Coordinator->>PR: Trigger Pull Request
     activate PR
     Note over PR: Start Span: "pull_request_agent_run"
-    PR->>PR: Clone repo, create branch & commit integration script
-    PR->>GH: POST /repos/{owner}/{repo}/pulls (with GCS download links)
-    activate GH
-    GH-->>PR: Pull Request URL
+    PR->>PR: Apply C++ diff to target class, compute git diff
+    PR->>GH: POST /repos/{owner}/{repo}/pulls (with detailed C++ PR comment & git diff)
+```    activate GH
+    GH-->>PR: PR URL (e.g. github.com/.../pulls/1)
     deactivate GH
     PR-->>Coordinator: PR URL
     deactivate PR
@@ -112,8 +102,6 @@ sequenceDiagram
     CLI-->>Dev: Print PR URL & GCS Asset URIs
     deactivate CLI
 ```
-
----
 
 ## 2. Sub-Agent Operations and State Transitions
 

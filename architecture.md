@@ -50,21 +50,20 @@ graph TB
     
     %% Orchestration
     Runner -->|Bootstrap Session| ADK
-    ADK -->|1. Expand Metadata| PromptCrafter[Prompt Crafter Agent]
-    ADK -->|2. Map Foley Assets| CreativeAudio[Audio Asset Selector Agent]
-    ADK -->|3. Generate UE5 Script| UnrealAgent[Unreal Agent]
-    ADK -->|4. Execute & Validate| ValidationAgent[Validation Agent]
-    ADK -->|5. Upload Deliverables| GCSUploader[GCS Uploader Agent]
-    ADK -->|6. Create PR| PRAgent[Pull Request Agent]
+    ADK -->|1. Expand Prompt| PromptCrafter[Prompt Crafter Agent]
+    ADK -->|2. Query C++ Context| UnrealAgent[Unreal C++ Agent]
+    ADK -->|3. Sandboxed Compilation & Smoke Test| ValidationAgent[Validation Agent]
+    ADK -->|4. Upload Deliverables| GCSUploader[GCS Uploader Agent]
+    ADK -->|5. Apply Diff & Create PR| PRAgent[Pull Request Agent]
 
     %% Services
     PromptCrafter -->|Inference| Gemini
-    CreativeAudio -->|Foley Asset Resolution| GCS
-    UnrealAgent -->|Semantic Blueprint Queries| VectorSearch
-    UnrealAgent -->|Code Generation| Gemini
-    ValidationAgent -->|Local Process Sandbox| LocalSandbox[Local Subprocess Sandbox]
-    GCSUploader -->|Upload Assets & PY| GCS
-    PRAgent -->|Clone, Push & Create PR| GitHub
+    UnrealAgent -->|Multi-Modal Search| VectorSearch
+    UnrealAgent -->|C++ Code Generation| Gemini
+    ValidationAgent -->|g++ & UE Mock Smoke Test Sandbox| LocalSandbox[Local Sandbox Subprocess]
+    GCSUploader -->|Upload WAV & C++ Meta| GCS
+    PRAgent -->|Apply C++ Diff & Create PR| GitHub
+
     
     %% Security
     Runner -->|Resolve API Keys & Tokens| SecretManager
@@ -87,9 +86,10 @@ graph TB
 * **Gemini 3.1 Pro**: Core reasoning engine driving prompt expansion, Unreal Engine Python script generation, vector query synthesis, and sandbox dry-run auto-correction.
 * **Gemini 3.1 Flash**: Deployed for lightweight, latency-critical operations.
 
-### 2.3 Semantic Asset & Code Discovery (Vertex AI Vector Search 2.0)
-* **Vertex AI Vector Search 2.0 Collections**: Serverless collection storing dense vector representations (3072 dimensions) of Unreal Engine C++ and Blueprint code.
-* **`gemini-embedding-2-preview`**: Auto-embedding model used by `cmd/vector-indexer` to index project assets (`Source/` and `Content/`).
+### 2.2 Large Language Models & Multimodal AI
+* **Gemini 3.1 Pro**: Leveraged as the heavy reasoning core for the central coordinator, Unreal Agent, and Validation Agent to handle prompt structural expansion, Python code generation, and dry-run self-correction.
+* **Gemini 3.1 Flash**: Used for lightweight, latency-critical subtasks.
+* **Vector Search 2.0**: Used as a multi-modal semantic search layer
 
 ### 2.4 Pre-Existing Foley Asset Selection & Management
 * **Audio Asset Selector**: Resolves pre-existing Foley sound effects from target storage repositories, mapping expanded acoustic metadata (materials, speeds, dynamics) to appropriate sound assets without live audio generation.

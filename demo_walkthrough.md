@@ -1,6 +1,6 @@
 # Step-by-Step Deployment & Operation Demo Guide
 
-This guide provides comprehensive instructions for setting up the **Autonomous Game Assist** platform infrastructure, deploying the agent runner in a hardened Google Kubernetes Engine (GKE) sandbox, and executing end-to-end jobs using the developer CLI suite.
+This guide provides comprehensive, command-by-command instructions for setting up the **Autonomous Game Assist** platform infrastructure, deploying the agent runner in a Google Kubernetes Engine sandbox, and executing end-to-end jobs using the developer CLI.
 
 ---
 
@@ -17,7 +17,7 @@ Set environment variables for deployment. Replace placeholders with your actual 
 
 ```bash
 # Core GCP configurations
-export GCP_PROJECT="develop-491110"
+export GCP_PROJECT=<INSERT YOUR PROJECT ID>
 export GCP_LOCATION="us-central1"
 export ENV="dev"
 
@@ -28,8 +28,8 @@ export GCS_BUCKET="${GCP_PROJECT}-${ENV}-${GCP_LOCATION}-gameassist-bucket"
 export VECTOR_COLLECTION_ID="${GCP_PROJECT}-${ENV}-${GCP_LOCATION}-gameassist-collection"
 
 # GitHub Repository Details (For PR Agent review delivery)
-export GITHUB_OWNER="ikogan"
-export GITHUB_REPO="autonomous-game-assist-cli"
+export GITHUB_OWNER="iuriikogan" ## replace with your own repo
+export GITHUB_REPO="OpenWorldRPG"
 export GITHUB_BASE_BRANCH="main"
 export GITHUB_TOKEN_SECRET_PATH="projects/${GCP_PROJECT}/secrets/github-token/versions/latest"
 ```
@@ -134,9 +134,6 @@ gcloud secrets create github-token \
 # Add secret version
 echo -n "YOUR_GITHUB_TOKEN" | gcloud secrets versions add github-token --data-file=-
 ```
-
----
-
 ## Section 3: GKE Hardening & Workload Identity Setup
 
 ### 1. Create Namespace & Service Accounts
@@ -183,8 +180,6 @@ gcloud iam service-accounts add-iam-policy-binding "game-assist-runner-gsa@${GCP
 sed -i "s/YOUR_GCP_PROJECT_ID/${GCP_PROJECT}/g" deployments/kubernetes/service_account.yaml
 kubectl apply -f deployments/kubernetes/service_account.yaml
 ```
-
----
 
 ## Section 4: Building & Deploying the Agent Runner
 

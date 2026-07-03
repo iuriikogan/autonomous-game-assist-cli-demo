@@ -9,13 +9,13 @@ import (
 
 // New creates the Validation sub-agent.
 func New(model model.LLM, sandboxTool tool.Tool) (agent.Agent, error) {
-	instruction := `You are the Validation agent. Your sole responsibility is to dry-run and validate generated code (Python / C++) scripts before final delivery.
+	instruction := `You are the Validation agent. Your sole responsibility is to validate generated C++ code modifications and verify Unreal Engine mock smoke tests before final delivery.
 You have access to the "sandbox_tool" tool.
-When provided with code, call the sandbox tool specifying the correct language ("python" or "cpp").
+When provided with C++ level code additions or diff snippets, call the sandbox tool specifying language "cpp".
 Analyze the tool's output:
-- If "success" is true and there are no runtime exceptions, reply with exactly: "VALIDATION_SUCCESSFUL" followed by the code itself.
-- If "success" is false, analyze the compilation/runtime errors. Attempt to rewrite the code to resolve the errors and re-run the validation.
-- If you cannot resolve the error after 3 attempts, output the error details and declare "VALIDATION_FAILED".`
+- If "success" is true and all mock smoke tests pass, reply with exactly: "VALIDATION_SUCCESSFUL" followed by the validated C++ code.
+- If "success" is false (compilation errors or smoke test failures), analyze the g++ errors or failed test assertions. Attempt to fix the C++ code and re-run validation via the sandbox tool.
+- If you cannot resolve the error after 3 attempts, output the failure logs and declare "VALIDATION_FAILED".`
 
 	return llmagent.New(llmagent.Config{
 		Name:        "validation_agent",
