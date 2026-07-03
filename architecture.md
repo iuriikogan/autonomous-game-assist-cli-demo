@@ -22,7 +22,7 @@ graph TB
         end
 
         subgraph GenAI & Search Services
-            Gemini[Gemini 3.1 Pro / Flash Models]
+            Gemini[Gemini 3.1 Pro: gemini-3.1-pro-preview]
             VectorSearch[Vertex AI Vector Search 2.0 Collection]
         end
 
@@ -49,22 +49,19 @@ graph TB
     CLI -.->|Download Assets & Scripts| GCS
     
     %% Orchestration
-    Runner -->|Bootstrap Session| ADK
-    ADK -->|1. Expand Prompt| PromptCrafter[Prompt Crafter Agent]
-    ADK -->|2. Query C++ Context| UnrealAgent[Unreal C++ Agent]
-    ADK -->|3. Sandboxed Compilation & Smoke Test| ValidationAgent[Validation Agent]
-    ADK -->|4. Upload Deliverables| GCSUploader[GCS Uploader Agent]
-    ADK -->|5. Apply Diff & Create PR| PRAgent[Pull Request Agent]
+    Runner -->|Bootstrap Session & Audio State| ADK
+    ADK -->|1. Query Code/Blueprint Context & Gen UE5 Script| UnrealAgent[Unreal Agent]
+    ADK -->|2. Sandboxed Dry-Run & Verification| ValidationAgent[Validation Agent]
+    ADK -->|3. Upload Deliverables| GCSUploader[GCS Uploader Agent]
+    ADK -->|4. Commit & Create PR| PRAgent[Pull Request Agent]
 
     %% Services
-    PromptCrafter -->|Inference| Gemini
     UnrealAgent -->|Multi-Modal Search| VectorSearch
-    UnrealAgent -->|C++ Code Generation| Gemini
-    ValidationAgent -->|g++ & UE Mock Smoke Test Sandbox| LocalSandbox[Local Sandbox Subprocess]
-    GCSUploader -->|Upload WAV & C++ Meta| GCS
-    PRAgent -->|Apply C++ Diff & Create PR| GitHub
+    UnrealAgent -->|Python Code Generation| Gemini
+    ValidationAgent -->|Python Subprocess Dry-Run Sandbox| LocalSandbox[Local Sandbox Subprocess]
+    GCSUploader -->|Upload WAV & Python Script| GCS
+    PRAgent -->|Commit Script & Create PR| GitHub
 
-    
     %% Security
     Runner -->|Resolve API Keys & Tokens| SecretManager
     
@@ -79,28 +76,21 @@ graph TB
 ## 2. Core System Components & GCP Integration
 
 ### 2.1 Central Orchestration
-* **Agent Development Kit (ADK)**: Framework managing sequential execution flow, intermediate state variables, and context propagation across agent boundaries.
-* **Agent Runner (`cmd/agent-runner`)**: Bootstrapped inside containerized GKE gVisor runtimes, resolving secrets from Secret Manager, initializing dependencies, and executing orchestration workflows.
-
-### 2.2 Large Language Models
-* **Gemini 3.1 Pro**: Core reasoning engine driving prompt expansion, Unreal Engine Python script generation, vector query synthesis, and sandbox dry-run auto-correction.
-* **Gemini 3.1 Flash**: Deployed for lightweight, latency-critical operations.
+* **Agent Development Kit (ADK)**: Framework managing sequential execution flow across 4 core sub-agents (`unreal_agent`, `validation_agent`, `gcs_uploader`, `pull_request_agent`), intermediate state variables, and context propagation.
+* **Agent Runner (`cmd/agent-runner`)**: Bootstrapped inside containerized GKE gVisor runtimes, accepting optional `-audio` file path flags, pre-populating session state with `audio_binary`, resolving secrets from Secret Manager, and executing orchestration workflows.
 
 ### 2.2 Large Language Models & Multimodal AI
-* **Gemini 3.1 Pro**: Leveraged as the heavy reasoning core for the central coordinator, Unreal Agent, and Validation Agent to handle prompt structural expansion, Python code generation, and dry-run self-correction.
-* **Gemini 3.1 Flash**: Used for lightweight, latency-critical subtasks.
-* **Vector Search 2.0**: Used as a multi-modal semantic search layer
+* **Gemini 3.1 Pro (`gemini-3.1-pro-preview`)**: Core reasoning engine driving Unreal Engine Python script generation, vector query synthesis, and sandbox dry-run auto-correction.
+* **Gemini 3.1 Flash**: Deployed for lightweight, latency-critical operations.
+* **Vector Search 2.0**: Used as a multi-modal semantic search layer over target C++ source and Blueprint asset collections.
 
-### 2.4 Pre-Existing Foley Asset Selection & Management
-* **Audio Asset Selector**: Resolves pre-existing Foley sound effects from target storage repositories, mapping expanded acoustic metadata (materials, speeds, dynamics) to appropriate sound assets without live audio generation.
+### 2.3 Sandboxed Local Subprocesses
+* **Subprocess Sandbox**: Dry-runs generated Unreal Engine 5 Python automation scripts in isolated sub-processes, capturing execution errors, exit codes, and diagnostics for iterative auto-correction.
 
-### 2.5 Sandboxed Local Subprocesses
-* **Subprocess Sandbox**: Dry-runs generated Unreal Engine 5 Python automation scripts in isolated sub-processes, capturing compilation errors, exit codes, and diagnostics for iterative auto-correction.
-
-### 2.6 Delivery & Storage (Cloud Storage)
+### 2.4 Delivery & Storage (Cloud Storage)
 * **Google Cloud Storage (GCS)**: Stores selected Foley sound assets and validated Python automation scripts under session-keyed paths (`audio/foley_{session_id}.wav` and `scripts/unreal_assist_{session_id}.py`).
 
-### 2.7 Pull Request Agent (Human-in-the-Loop Review)
+### 2.5 Pull Request Agent (Human-in-the-Loop Review)
 * **GitHub Pull Request Integration**: Authenticates via GitHub Personal Access Tokens stored in Secret Manager, clones repository branches, commits integration scripts, and opens PRs containing direct asset download links.
 
 ---
