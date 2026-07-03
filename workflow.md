@@ -6,7 +6,7 @@ This document outlines the step-by-step sequential processing workflow of the Au
 
 ## 1. Core Execution Flow
 
-When a game developer triggers the CLI with a high-level request (e.g., `./game-assist generate "Integrate existing metal footstep sound effect on trigger overlap"`), the Central Coordinator orchestrates six cooperative agent steps in sequence to expand metadata, select audio assets, query Blueprint indexes, validate integration scripts, and deliver PRs.
+When a game developer triggers the CLI with a high-level request (e.g., `./game-assist generate "Integrate existing metal footstep sound effect on trigger overlap"`), the Central Coordinator orchestrates four cooperative agent steps in sequence to query Blueprint indexes, generate and validate Python integration scripts, stage GCS assets, and deliver PRs.
 
 ```mermaid
 sequenceDiagram
@@ -15,11 +15,10 @@ sequenceDiagram
     participant CLI as Local CLI (game-assist)
     participant Runner as Agent Runner (GKE Job)
     participant Coordinator as Central Coordinator Agent
-    participant PC as Prompt Crafter Agent
-    participant UA as Unreal C++ Agent
+    participant UA as Unreal Agent
     participant VA as Validation Agent
     participant VS as Multi-Modal Vector Search Tool
-    participant SB as Sandbox Tool (g++ & Smoke Harness)
+    participant SB as Subprocess Sandbox Tool
     participant Uploader as GCS Uploader Agent
     participant GCS as Cloud Storage
     participant PR as Pull Request Agent
@@ -29,67 +28,59 @@ sequenceDiagram
     activate CLI
     CLI->>Runner: Deploy GKE Sandbox Job
     activate Runner
-    Runner->>Coordinator: Start execution session
+    Runner->>Coordinator: Start session with audio_binary state
     activate Coordinator
     Note over Coordinator: Start Trace: "game-assist-workflow"
 
-    %% Step 1: Prompt Expansion & Acoustic Metadata
-    Coordinator->>PC: Trigger Metadata Expansion
-    activate PC
-    Note over PC: Start Span: "prompt_crafter_run"
-    PC->>PC: Extract WAV asset intent & target level context
-    PC-->>Coordinator: Rich level_integration_description
-    deactivate PC
-
-    %% Step 2: C++ Code Generation with Multi-Modal Vector Context
-    Coordinator->>UA: Trigger C++ Code Gen
+    %% Step 1: Python Code Generation with Multi-Modal Vector Context
+    Coordinator->>UA: Trigger UE5 Script Generation
     activate UA
     Note over UA: Start Span: "unreal_agent_run"
-    UA->>VS: Query multi-modal index for base C++ level classes & WAV metadata
+    UA->>VS: Query multi-modal index for base Blueprint classes & asset context
     activate VS
     Note over VS: Start Span: "vector_search_tool"
-    VS-->>UA: Base C++ class structure & WAV asset paths
+    VS-->>UA: Base class structures & asset paths
     deactivate VS
-    UA->>UA: Write Unreal C++ level actor code additions
-    UA-->>Coordinator: C++ code additions (unreal_script)
+    UA->>UA: Generate UE5 Python automation script
+    UA-->>Coordinator: Python integration script (unreal_script)
     deactivate UA
 
-    %% Step 3: Sandboxed Compilation & Mock Smoke Test Validation
-    Coordinator->>VA: Trigger C++ Validation
+    %% Step 2: Sandboxed Dry-Run & Verification Validation
+    Coordinator->>VA: Trigger Python Validation
     activate VA
     Note over VA: Start Span: "validation_agent_run"
     
-    loop Sandboxed C++ Compile & Smoke Test (up to 3 attempts)
-        VA->>SB: Execute g++ compilation & mock smoke test harness
+    loop Sandboxed Dry-Run Execution (up to 3 attempts)
+        VA->>SB: Execute Python dry-run harness in isolated subprocess
         activate SB
         Note over SB: Start Span: "sandbox_execution_tool"
-        SB-->>VA: Exit code, stdout/smoke test results, stderr
+        SB-->>VA: Exit code, stdout/stderr diagnostic logs
         deactivate SB
-        alt compile / smoke test fails
-            VA->>VA: Rewrite C++ code additions based on stderr/test logs
+        alt dry-run fails
+            VA->>VA: Rewrite Python script based on stderr/diagnostic logs
         else success
-            Note over VA: All 3/3 mock smoke tests PASSED
+            Note over VA: Dry-run execution PASSED
         end
     end
     
     VA-->>Coordinator: validated_script
     deactivate VA
 
-    %% Step 4: Staging Deliverables to Cloud Storage
+    %% Step 3: Staging Deliverables to Cloud Storage
     Coordinator->>Uploader: Trigger Staging
     activate Uploader
     Note over Uploader: Start Span: "gcs_uploader_run"
-    Uploader->>GCS: Stage target WAV files and metadata
-    Uploader-->>Coordinator: Asset GCS URIs
+    Uploader->>GCS: Stage target WAV files and Python script
+    Uploader-->>Coordinator: Asset & script GCS URIs
     deactivate Uploader
 
-    %% Step 5: Git Diff Application & Detailed PR Comment Creation
+    %% Step 4: Git Branch Creation & Detailed PR Creation
     Coordinator->>PR: Trigger Pull Request
     activate PR
     Note over PR: Start Span: "pull_request_agent_run"
-    PR->>PR: Apply C++ diff to target class, compute git diff
-    PR->>GH: POST /repos/{owner}/{repo}/pulls (with detailed C++ PR comment & git diff)
-```    activate GH
+    PR->>PR: Commit script to content/scripts/, prepare PR body
+    PR->>GH: POST /repos/{owner}/{repo}/pulls (with GCS asset download links)
+    activate GH
     GH-->>PR: PR URL (e.g. github.com/.../pulls/1)
     deactivate GH
     PR-->>Coordinator: PR URL
@@ -103,47 +94,38 @@ sequenceDiagram
     deactivate CLI
 ```
 
+---
+
 ## 2. Sub-Agent Operations and State Transitions
 
 ### 2.1 Central Coordinator Agent
 * **Type**: Orchestrator (`sequentialagent`)
-* **State Inputs**: Developer natural language prompt from `game-assist`.
-* **Responsibility**: Manages session variables, coordinates sub-agent execution, and propagates OpenTelemetry trace contexts.
+* **State Inputs**: Developer prompt from `game-assist`, `audio_binary` pre-populated in session state by `agent-runner`.
+* **Responsibility**: Manages session variables, coordinates 4 sub-agent executions, and propagates OpenTelemetry trace contexts.
 
-### 2.2 Prompt Crafter Agent
-* **Type**: Reasoner (`llmagent` using Gemini 3.1 Pro)
-* **State Output**: `foley_description` (string)
-* **Instruction**: Expands developer request into detailed acoustic dynamics, materials (steel, sand, foliage), impact velocities, and reverberation metadata.
-
-### 2.3 Audio Asset Selector
-* **Type**: Asset Resolver (`coordinator.assetSelector`)
-* **State Input**: `foley_description`
-* **State Output**: `audio_asset_uri` (string)
-* **Instruction**: Identifies and selects the best matching pre-existing Foley sound asset from the central sound repository.
-
-### 2.4 Unreal Agent
-* **Type**: Integration Coder (`llmagent` using Gemini 3.1 Pro)
+### 2.2 Unreal Agent
+* **Type**: Integration Coder (`llmagent` using Gemini 3.1 Pro: `gemini-3.1-pro-preview`)
 * **Tool**: `vector_search`
 * **State Output**: `unreal_script` (Python string)
 * **Instruction**: Queries **Vertex AI Vector Search 2.0 Collections** to discover target Level Blueprints and actor classes, generating a Python script to link the selected Foley sound asset to UE5 trigger volumes.
 
-### 2.5 Validation Agent & Auto-Correction Loop
-* **Type**: Quality Assurance Coder (`llmagent` using Gemini 3.1 Pro)
+### 2.3 Validation Agent & Auto-Correction Loop
+* **Type**: Quality Assurance Coder (`llmagent` using Gemini 3.1 Pro: `gemini-3.1-pro-preview`)
 * **Tool**: `sandbox_tool`
 * **State Input**: `unreal_script`
 * **State Output**: `validated_script` (Python string)
 * **Loop Logic**:
-  1. Executes script in isolated subprocess sandbox.
+  1. Executes script in isolated Python subprocess sandbox.
   2. Evaluates exit status and `stderr`.
   3. Rewrites script upon syntax or API errors (maximum 3 iterations).
 
-### 2.6 GCS Uploader Agent
+### 2.4 GCS Uploader Agent
 * **Type**: Storage System Agent (`coordinator.gcsUploader`)
-* **State Inputs**: `audio_asset_uri`, `validated_script`
-* **State Output**: `gs://` delivery paths
+* **State Inputs**: `audio_binary`, `validated_script`
+* **State Output**: `gs://` delivery paths (`audio/foley_{session_id}.wav`, `scripts/unreal_assist_{session_id}.py`)
 * **Instruction**: Uploads validated script and Foley audio asset under session-keyed storage locations.
 
-### 2.7 Pull Request Agent
+### 2.5 Pull Request Agent
 * **Type**: Git Integration Agent (`pr.Agent`)
 * **State Inputs**: `validated_script`, `audio_gcs_uri`, `script_gcs_uri`, `prompt`
 * **State Output**: GitHub Pull Request URL

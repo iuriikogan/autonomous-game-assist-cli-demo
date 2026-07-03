@@ -12,19 +12,15 @@ graph TD
     
     subgraph Coordinator Workflow
         direction TB
-        P1[Prompt Crafter Agent] -->|1. Expand Foley Acoustic Metadata| P2[Audio Asset Selector Agent]
-        P2 -->|2. Map Pre-Existing Foley Assets| P3[Unreal Agent]
-        P3 -->|3. Semantic Discovery via Vector Search 2.0| P3
-        P3 -->|4. Generate UE5 Python Script| P4[Validation Agent]
-        P4 -->|5. Dry-Run Subprocess Sandbox| P4
-        P4 -->|6. Verify & Auto-Correct Loop| P5[GCS Uploader Agent]
-        P5 -->|7. Secure WAV Asset & Script URIs| P6[Pull Request Agent]
-        P6 -->|8. Commit & Open PR| GH[GitHub Repository]
+        P1[Unreal Agent] -->|1. Discovery via Vector Search 2.0 & Generate UE5 Script| P2[Validation Agent]
+        P2 -->|2. Dry-Run Subprocess Sandbox & Auto-Correct| P3[GCS Uploader Agent]
+        P3 -->|3. Secure WAV Asset & Script URIs| P4[Pull Request Agent]
+        P4 -->|4. Commit & Open PR| GH[GitHub Repository]
     end
     
     P1 -->|Gemini 3.1 Pro| VertexAI[Vertex AI Platform]
-    P3 -->|Vector Collection Query| GVS[Vertex AI Vector Search 2.0]
-    P5 -->|Asset Storage| GCS[Google Cloud Storage]
+    P1 -->|Vector Collection Query| GVS[Vertex AI Vector Search 2.0]
+    P3 -->|Asset Storage| GCS[Google Cloud Storage]
     Runner -->|Trace Context| CloudTrace[Google Cloud Trace]
 ```
 
@@ -107,7 +103,7 @@ The central execution engine triggered as a containerized job on GKE under gViso
 go build -o agent-runner ./cmd/agent-runner
 
 # Run directly (requires local ADC or active credentials)
-./agent-runner -prompt "Integrate existing metal footstep sound effect on trigger overlap"
+./agent-runner -prompt "Integrate existing metal footstep sound effect on trigger overlap" -audio "./foley_session.wav"
 ```
 
 ## Docker Compilation & Artifact Registry

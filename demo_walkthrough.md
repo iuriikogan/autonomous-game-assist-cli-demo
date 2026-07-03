@@ -219,12 +219,10 @@ RUNNER_IMAGE="${GCP_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/autonomous-game-assi
 
 ### 3. Monitoring & Results
 The `game-assist` CLI streams logs directly from the GKE gVisor sandbox. The job will:
-1. Expand acoustic metadata with Gemini 3.1 Pro.
-2. Resolve pre-existing Foley sound asset details.
-3. Query Vector Search 2.0 for target Blueprint classes.
-4. Generate and validate the UE5 Python integration script in the subprocess sandbox.
-5. Store deliverables in GCS.
-6. Open a GitHub Pull Request with asset download links.
+1. Query Vector Search 2.0 for target Blueprint classes & generate UE5 Python integration script using Gemini 3.1 Pro (`gemini-3.1-pro-preview`).
+2. Validate the UE5 Python integration script in the isolated subprocess sandbox.
+3. Upload deliverables (WAV audio asset and validated Python script) to GCS.
+4. Open a GitHub Pull Request with asset download links.
 
 ### 4. Downloading Synthesized Deliverables
 Download deliverables using output Session ID:
