@@ -150,6 +150,5 @@ All provisioned GCP infrastructure and Vector Search collections enforce mandato
 | Label | Description | Example |
 | :--- | :--- | :--- |
 | `environment` | Target deployment environment | `dev` / `staging` / `prod` |
-| `owner` | Responsible user or team handle | `ikogan` |
 | `cost-center` | FinOps accounting budget unit | `gaming-assist-ai` |
 | `managed-by` | Provisioning engine or tool | `terraform` / `vector-indexer` |
