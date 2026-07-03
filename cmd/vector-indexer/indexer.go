@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"google.golang.org/genai"
 )
@@ -26,19 +29,14 @@ type Indexer struct {
 
 // DataObject represents the JSON body structured for Vector Search 2.0.
 type DataObject struct {
-	ID     string     `json:"id"`
-	Fields DataFields `json:"fields"`
+	Data DataFields `json:"data"`
 }
 
 // DataFields maps exact keys defined in our Collection data schema.
 type DataFields struct {
-	Path        stringField `json:"path"`
-	Type        stringField `json:"type"`
-	Description stringField `json:"description"`
-}
-
-type stringField struct {
-	StringValue string `json:"stringValue"`
+	Path        string `json:"path"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
 }
 
 // NewIndexer initializes the OpenWorldRPG codebase indexer.
@@ -131,6 +129,10 @@ func (idx *Indexer) walkAndIndex(ctx context.Context, rootDir string, extensions
 		}
 
 		fmt.Printf("Successfully uploaded data object for %s\n", relPath)
+
+		// Introduce a small delay to avoid rate limits (429 Resource Exhausted)
+		time.Sleep(1 * time.Second)
+
 		return nil
 	})
 }
@@ -148,7 +150,7 @@ Do not use introductory phrases like "Here is the summary". Output ONLY the conc
 Source Code:
 %s`, filepath, content)
 
-	resp, err := idx.genaiClient.Models.GenerateContent(ctx, "gemini-2.0-flash", genai.Text(prompt), nil)
+	resp, err := idx.genaiClient.Models.GenerateContent(ctx, "gemini-2.5-flash", genai.Text(prompt), nil)
 	if err != nil {
 		return "", err
 	}
@@ -166,7 +168,7 @@ Use standard Unreal Engine 5 conventions (e.g. ABP_ represents Animation Bluepri
 
 Do not use introductory phrases. Output ONLY the concise paragraph description.`, assetPath)
 
-	resp, err := idx.genaiClient.Models.GenerateContent(ctx, "gemini-2.0-flash", genai.Text(prompt), nil)
+	resp, err := idx.genaiClient.Models.GenerateContent(ctx, "gemini-2.5-flash", genai.Text(prompt), nil)
 	if err != nil {
 		return "", err
 	}
@@ -176,19 +178,15 @@ Do not use introductory phrases. Output ONLY the concise paragraph description.`
 
 // uploadDataObject sends a POST request to the Vector Search 2.0 REST endpoint to upsert the Data Object.
 func (idx *Indexer) uploadDataObject(ctx context.Context, path, assetType, description string) error {
-	// Clean/sanitize ID (must match RFC1035 alphanumeric/hyphen pattern or simple unique formats)
-	// We can replace non-alphanumeric characters in path with hyphens to form a valid ID.
-	id := strings.ReplaceAll(path, "/", "-")
-	id = strings.ReplaceAll(id, ".", "-")
-	id = strings.ReplaceAll(id, "_", "-")
-	id = strings.ToLower(id)
+	// Use MD5 of path as a unique, fixed-length ID (32 characters) to prevent 64 character limit errors
+	hash := md5.Sum([]byte(path))
+	id := hex.EncodeToString(hash[:])
 
 	obj := DataObject{
-		ID: id,
-		Fields: DataFields{
-			Path:        stringField{StringValue: path},
-			Type:        stringField{StringValue: assetType},
-			Description: stringField{StringValue: description},
+		Data: DataFields{
+			Path:        path,
+			Type:        assetType,
+			Description: description,
 		},
 	}
 
@@ -198,9 +196,9 @@ func (idx *Indexer) uploadDataObject(ctx context.Context, path, assetType, descr
 	}
 
 	// REST URL format for Vector Search 2.0:
-	// POST https://vectorsearch.googleapis.com/v1beta/projects/{project}/locations/{location}/collections/{collection}/dataObjects
-	apiURL := fmt.Sprintf("https://vectorsearch.googleapis.com/v1beta/projects/%s/locations/%s/collections/%s/dataObjects",
-		idx.projectID, idx.location, idx.collectionID)
+	// POST https://vectorsearch.googleapis.com/v1beta/projects/{project}/locations/{location}/collections/{collection}/dataObjects?dataObjectId={dataObjectId}
+	apiURL := fmt.Sprintf("https://vectorsearch.googleapis.com/v1beta/projects/%s/locations/%s/collections/%s/dataObjects?dataObjectId=%s",
+		idx.projectID, idx.location, idx.collectionID, id)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -220,8 +218,42 @@ func (idx *Indexer) uploadDataObject(ctx context.Context, path, assetType, descr
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
+	if resp.StatusCode == http.StatusConflict {
+		fmt.Printf("DataObject %s already exists, attempting to update via PATCH...\n", id)
+		return idx.updateDataObject(ctx, id, bodyBytes)
+	}
+
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBytes))
+	}
+
+	return nil
+}
+
+func (idx *Indexer) updateDataObject(ctx context.Context, id string, bodyBytes []byte) error {
+	apiURL := fmt.Sprintf("https://vectorsearch.googleapis.com/v1beta/projects/%s/locations/%s/collections/%s/dataObjects/%s",
+		idx.projectID, idx.location, idx.collectionID, id)
+
+	req, err := http.NewRequestWithContext(ctx, "PATCH", apiURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create PATCH request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := idx.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("PATCH request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read PATCH response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("PATCH API returned status %d: %s", resp.StatusCode, string(respBytes))
 	}
 
 	return nil

@@ -35,8 +35,8 @@ func TestGenerateText_Success_Flash(t *testing.T) {
 
 	mockModels := &mockGenAIModels{
 		GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
-			if model != "gemini-3.1-flash" {
-				t.Errorf("expected model gemini-3.1-flash, got %s", model)
+			if model != "gemini-2.5-flash" {
+				t.Errorf("expected model gemini-2.5-flash, got %s", model)
 			}
 			if len(contents) != 1 || len(contents[0].Parts) != 1 || contents[0].Parts[0].Text != expectedPrompt {
 				t.Errorf("unexpected contents: %v", contents)
@@ -77,8 +77,8 @@ func TestGenerateText_Success_Pro(t *testing.T) {
 
 	mockModels := &mockGenAIModels{
 		GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
-			if model != "gemini-3.1-pro" {
-				t.Errorf("expected model gemini-3.1-pro, got %s", model)
+			if model != "gemini-2.5-pro" {
+				t.Errorf("expected model gemini-2.5-pro, got %s", model)
 			}
 			return &genai.GenerateContentResponse{
 				Candidates: []*genai.Candidate{

@@ -14,6 +14,8 @@ func TestDispatchJob_Success(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	dispatcher := NewDispatcherWithClientset(fakeClientset)
 
+	setupTestEnv(t)
+
 	jobName := "test-agent-job"
 	imageName := "gcr.io/project/agent-runner:latest"
 	args := []string{"--task", "generate-foley", "--prompt", "footsteps in gravel"}
@@ -58,6 +60,33 @@ func TestDispatchJob_Success(t *testing.T) {
 		t.Errorf("unexpected container args: %v", container.Args)
 	}
 
+	// Verify environment variables
+	expectedEnv := map[string]string{
+		"GCS_BUCKET":               "test-bucket",
+		"GCP_PROJECT":              "test-project",
+		"GITHUB_TOKEN_SECRET_PATH": "/secrets/github-token",
+		"GITHUB_OWNER":             "test-owner",
+		"GITHUB_REPO":              "test-repo",
+		"GCP_LOCATION":             "us-central1", // default value
+		"GITHUB_BASE_BRANCH":       "main",        // default value
+	}
+
+	for _, env := range container.Env {
+		val, exists := expectedEnv[env.Name]
+		if !exists {
+			t.Errorf("unexpected environment variable in container: %s", env.Name)
+			continue
+		}
+		if env.Value != val {
+			t.Errorf("expected env %s to have value %s, got %s", env.Name, val, env.Value)
+		}
+		delete(expectedEnv, env.Name)
+	}
+
+	if len(expectedEnv) > 0 {
+		t.Errorf("missing expected environment variables in container: %v", expectedEnv)
+	}
+
 	// Check the mock cluster directly
 	jobsList, err := fakeClientset.BatchV1().Jobs("game-assist").List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -73,6 +102,8 @@ func TestDispatchJob_InvalidParams(t *testing.T) {
 	ctx := context.Background()
 	fakeClientset := fake.NewSimpleClientset()
 	dispatcher := NewDispatcherWithClientset(fakeClientset)
+
+	setupTestEnv(t)
 
 	// Test empty jobName
 	_, err := dispatcher.DispatchJob(ctx, "", "image", []string{})
@@ -93,6 +124,8 @@ func TestWaitForJob_Success(t *testing.T) {
 
 	fakeClientset := fake.NewSimpleClientset()
 	dispatcher := NewDispatcherWithClientset(fakeClientset)
+
+	setupTestEnv(t)
 
 	jobName := "test-job"
 	namespace := "game-assist"
@@ -127,6 +160,8 @@ func TestStreamJobLogs_Success(t *testing.T) {
 
 	fakeClientset := fake.NewSimpleClientset()
 	dispatcher := NewDispatcherWithClientset(fakeClientset)
+
+	setupTestEnv(t)
 
 	jobName := "test-job"
 	namespace := "game-assist"
@@ -163,5 +198,96 @@ func TestStreamJobLogs_Success(t *testing.T) {
 	}
 	if stream != nil {
 		stream.Close()
+	}
+}
+
+func setupTestEnv(t *testing.T) {
+	t.Setenv("GCS_BUCKET", "test-bucket")
+	t.Setenv("GCP_PROJECT", "test-project")
+	t.Setenv("GITHUB_TOKEN_SECRET_PATH", "/secrets/github-token")
+	t.Setenv("GITHUB_OWNER", "test-owner")
+	t.Setenv("GITHUB_REPO", "test-repo")
+	// Clear optional/default env vars to isolate from host environment
+	t.Setenv("GCP_LOCATION", "")
+	t.Setenv("GITHUB_BASE_BRANCH", "")
+	t.Setenv("VECTOR_COLLECTION_ID", "")
+	t.Setenv("GEMINI_API_KEY_SECRET_PATH", "")
+}
+
+func TestDispatchJob_EnvPropagation(t *testing.T) {
+	ctx := context.Background()
+	fakeClientset := fake.NewSimpleClientset()
+	dispatcher := NewDispatcherWithClientset(fakeClientset)
+
+	setupTestEnv(t)
+	t.Setenv("GCP_LOCATION", "europe-west1")
+	t.Setenv("GITHUB_BASE_BRANCH", "dev")
+	t.Setenv("VECTOR_COLLECTION_ID", "my-collection")
+	t.Setenv("GEMINI_API_KEY_SECRET_PATH", "/secrets/gemini-api-key")
+
+	createdJob, err := dispatcher.DispatchJob(ctx, "test-job", "runner-image", []string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	container := createdJob.Spec.Template.Spec.Containers[0]
+	expectedEnv := map[string]string{
+		"GCS_BUCKET":                 "test-bucket",
+		"GCP_PROJECT":                "test-project",
+		"GITHUB_TOKEN_SECRET_PATH":   "/secrets/github-token",
+		"GITHUB_OWNER":               "test-owner",
+		"GITHUB_REPO":                "test-repo",
+		"GCP_LOCATION":               "europe-west1",
+		"GITHUB_BASE_BRANCH":         "dev",
+		"VECTOR_COLLECTION_ID":       "my-collection",
+		"GEMINI_API_KEY_SECRET_PATH": "/secrets/gemini-api-key",
+	}
+
+	for _, env := range container.Env {
+		val, exists := expectedEnv[env.Name]
+		if !exists {
+			t.Errorf("unexpected environment variable in container: %s", env.Name)
+			continue
+		}
+		if env.Value != val {
+			t.Errorf("expected env %s to have value %s, got %s", env.Name, val, env.Value)
+		}
+		delete(expectedEnv, env.Name)
+	}
+
+	if len(expectedEnv) > 0 {
+		t.Errorf("missing expected environment variables in container: %v", expectedEnv)
+	}
+}
+
+func TestDispatchJob_MissingRequiredEnv(t *testing.T) {
+	requiredEnvVars := []string{
+		"GCS_BUCKET",
+		"GCP_PROJECT",
+		"GITHUB_TOKEN_SECRET_PATH",
+		"GITHUB_OWNER",
+		"GITHUB_REPO",
+	}
+
+	for _, envVar := range requiredEnvVars {
+		t.Run(envVar, func(t *testing.T) {
+			ctx := context.Background()
+			fakeClientset := fake.NewSimpleClientset()
+			dispatcher := NewDispatcherWithClientset(fakeClientset)
+
+			// Explicitly clear the target env var to override host environment
+			t.Setenv(envVar, "")
+			// Set all other required ones
+			for _, other := range requiredEnvVars {
+				if other != envVar {
+					t.Setenv(other, "some-val")
+				}
+			}
+
+			_, err := dispatcher.DispatchJob(ctx, "test-job", "runner-image", []string{})
+			if err == nil {
+				t.Errorf("expected error when %s is missing, got nil", envVar)
+			}
+		})
 	}
 }

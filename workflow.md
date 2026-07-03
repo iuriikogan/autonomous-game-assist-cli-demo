@@ -16,17 +16,16 @@ sequenceDiagram
     participant Runner as Agent Runner (GKE Job)
     participant Coordinator as Central Coordinator Agent
     participant PC as Prompt Crafter Agent
-    participant CA as Creative Audio Agent
-    participant UA as Unreal Agent
+    participant UA as Unreal C++ Agent
     participant VA as Validation Agent
-    participant VS as Vector Search Tool
-    participant SB as Sandbox Tool
+    participant VS as Multi-Modal Vector Search Tool
+    participant SB as Sandbox Tool (g++ & Smoke Harness)
     participant Uploader as GCS Uploader Agent
     participant GCS as Cloud Storage
     participant PR as Pull Request Agent
     participant GH as GitHub API
 
-    Dev->>CLI: game-assist generate --prompt "[request]"
+    Dev->>CLI: game-assist generate --prompt "[WAV integration request]"
     activate CLI
     CLI->>Runner: Deploy GKE Job
     activate Runner
@@ -38,67 +37,59 @@ sequenceDiagram
     Coordinator->>PC: Trigger Expansion
     activate PC
     Note over PC: Start Span: "prompt_crafter_run"
-    PC->>PC: Expand sound texture & acoustics
-    PC-->>Coordinator: Rich foley_description
+    PC->>PC: Extract WAV asset intent & target level context
+    PC-->>Coordinator: Rich level_integration_description
     deactivate PC
 
-    %% Step 2: Multimodal synthesis
-    Coordinator->>CA: Trigger Foley Synthesis
-    activate CA
-    Note over CA: Start Span: "creative_audio_run"
-    CA->>CA: Natively synthesize WAV audio bytes
-    CA-->>Coordinator: foley audio WAV bytes
-    deactivate CA
-
-    %% Step 3: Script generation with semantic context
-    Coordinator->>UA: Trigger Script Gen
+    %% Step 2: C++ Code Generation with Multi-Modal Vector Context
+    Coordinator->>UA: Trigger C++ Code Gen
     activate UA
     Note over UA: Start Span: "unreal_agent_run"
-    UA->>VS: Query index for matching Level Blueprints
+    UA->>VS: Query multi-modal index for base C++ level classes & WAV metadata
     activate VS
     Note over VS: Start Span: "vector_search_tool"
-    VS-->>UA: Nearest neighbor asset paths
+    VS-->>UA: Base C++ class structure & WAV asset paths
     deactivate VS
-    UA->>UA: Write UE5 Python integration script
-    UA-->>Coordinator: Generated script (unreal_script)
+    UA->>UA: Write Unreal C++ level actor code additions
+    UA-->>Coordinator: C++ code additions (unreal_script)
     deactivate UA
 
-    %% Step 4: Local sandboxed dry-run with self-correction
-    Coordinator->>VA: Trigger Validation
+    %% Step 3: Sandboxed Compilation & Mock Smoke Test Validation
+    Coordinator->>VA: Trigger C++ Validation
     activate VA
     Note over VA: Start Span: "validation_agent_run"
     
-    loop Dry-run & Auto-Correction (up to 3 attempts)
-        VA->>SB: Execute code in isolated sandbox subprocess
+    loop Sandboxed C++ Compile & Smoke Test (up to 3 attempts)
+        VA->>SB: Execute g++ compilation & mock smoke test harness
         activate SB
         Note over SB: Start Span: "sandbox_execution_tool"
-        SB-->>VA: Exit code, stderr/errors
+        SB-->>VA: Exit code, stdout/smoke test results, stderr
         deactivate SB
-        alt execution fails
-            VA->>VA: Rewrite script based on stderr
+        alt compile / smoke test fails
+            VA->>VA: Rewrite C++ code additions based on stderr/test logs
         else success
-            Note over VA: End loop immediately on success
+            Note over VA: All 3/3 mock smoke tests PASSED
         end
     end
     
     VA-->>Coordinator: validated_script
     deactivate VA
 
-    %% Step 5: Delivery to Cloud Storage
-    Coordinator->>Uploader: Trigger Delivery
+    %% Step 4: Staging Deliverables to Cloud Storage
+    Coordinator->>Uploader: Trigger Staging
     activate Uploader
     Note over Uploader: Start Span: "gcs_uploader_run"
-    Uploader->>GCS: Upload audio WAV and Python Script
+    Uploader->>GCS: Stage target WAV files and metadata
     Uploader-->>Coordinator: Asset GCS URIs
     deactivate Uploader
 
-    %% Step 6: Human-in-the-loop Pull Request
+    %% Step 5: Git Diff Application & Detailed PR Comment Creation
     Coordinator->>PR: Trigger Pull Request
     activate PR
     Note over PR: Start Span: "pull_request_agent_run"
-    PR->>PR: Clone Repo, Create Branch & Commit Script
-    PR->>GH: POST /repos/{owner}/{repo}/pulls (with download links)
-    activate GH
+    PR->>PR: Apply C++ diff to target class, compute git diff
+    PR->>GH: POST /repos/{owner}/{repo}/pulls (with detailed C++ PR comment & git diff)
+```    activate GH
     GH-->>PR: PR URL (e.g. github.com/.../pulls/1)
     deactivate GH
     PR-->>Coordinator: PR URL

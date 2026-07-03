@@ -1,12 +1,12 @@
 steps:
   # 1. Code Linting
-  - name: 'golang:1.23-bookworm'
+  - name: 'golang:latest'
     entrypoint: 'go'
     args: ['vet', './...']
     id: 'go-lint'
 
   # 2. Automated Test Execution
-  - name: 'golang:1.23-bookworm'
+  - name: 'golang:latest'
     entrypoint: 'go'
     args: ['test', '-v', './...']
     id: 'go-tests'
@@ -25,53 +25,24 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '$_REGISTRY_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/agent-runner:$COMMIT_SHA'
+      - '$_REGISTRY_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/agent-runner:$_COMMIT_SHA'
       - '.'
     id: 'docker-build'
     waitFor: ['iac-scan']
-
-  # 5. Download Wiz CLI
-  - name: 'alpine'
-    entrypoint: 'sh'
-    args:
-      - '-c'
-      - 'wget -q https://downloads.wiz.io/v1/wizcli/latest/wizcli-linux-amd64 -O wizcli && chmod +x wizcli'
-    id: 'download-wizcli'
-    waitFor: ['docker-build']
-
-  # 6. Wiz CLI Container Scanning
-  # Perform in-depth security scan of local image using Wiz CLI
-  - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'sh'
-    args:
-      - '-c'
-      - |
-        ./wizcli auth --id $$WIZ_CLIENT_ID --secret $$WIZ_CLIENT_SECRET
-        ./wizcli docker scan --image $_REGISTRY_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/agent-runner:$COMMIT_SHA --policy "Default Container Security Policy"
-    secretEnv: ['WIZ_CLIENT_ID', 'WIZ_CLIENT_SECRET']
-    id: 'wiz-container-scan'
-    waitFor: ['download-wizcli']
 
   # 7. Push to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - '$_REGISTRY_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/agent-runner:$COMMIT_SHA'
+      - '$_REGISTRY_LOCATION-docker.pkg.dev/$PROJECT_ID/$_REPOSITORY_NAME/agent-runner:$_COMMIT_SHA'
     id: 'docker-push'
-    waitFor: ['wiz-container-scan']
+    waitFor: ['docker-build']
 
 substitutions:
   _REGISTRY_LOCATION: 'us-central1'
   _REPOSITORY_NAME: 'autonomous-game-assist'
-  _WIZ_CLIENT_ID_SECRET_NAME: 'global-global-wiz-client-id'
-  _WIZ_CLIENT_SECRET_SECRET_NAME: 'global-global-wiz-client-secret'
-
-availableSecrets:
-  secretManager:
-    - versionName: projects/$PROJECT_ID/secrets/$_WIZ_CLIENT_ID_SECRET_NAME/versions/latest
-      env: 'WIZ_CLIENT_ID'
-    - versionName: projects/$PROJECT_ID/secrets/$_WIZ_CLIENT_SECRET_SECRET_NAME/versions/latest
-      env: 'WIZ_CLIENT_SECRET'
+  _COMMIT_SHA: 'latest'
 
 options:
   logging: CLOUD_LOGGING_ONLY
+

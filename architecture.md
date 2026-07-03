@@ -47,20 +47,19 @@ graph TB
     %% Orchestration
     Runner -->|Bootstrap Session| ADK
     ADK -->|1. Expand Prompt| PromptCrafter[Prompt Crafter Agent]
-    ADK -->|2. Synthesize Foley| CreativeAudio[Creative Audio Agent]
-    ADK -->|3. Generate Script| UnrealAgent[Unreal Agent]
-    ADK -->|4. Execute & Validate| ValidationAgent[Validation Agent]
-    ADK -->|5. Upload Deliverables| GCSUploader[GCS Uploader Agent]
-    ADK -->|6. Create PR| PRAgent[Pull Request Agent]
+    ADK -->|2. Query C++ Context| UnrealAgent[Unreal C++ Agent]
+    ADK -->|3. Sandboxed Compilation & Smoke Test| ValidationAgent[Validation Agent]
+    ADK -->|4. Upload Deliverables| GCSUploader[GCS Uploader Agent]
+    ADK -->|5. Apply Diff & Create PR| PRAgent[Pull Request Agent]
 
     %% Services
     PromptCrafter -->|Inference| Gemini
-    CreativeAudio -->|Multimodal Audio Generation| Gemini
-    UnrealAgent -->|Embeddings & Queries| VectorSearch
-    UnrealAgent -->|Inference| Gemini
-    ValidationAgent -->|Local Process Sandbox| LocalSandbox[Local Sandbox Subprocess]
-    GCSUploader -->|Upload WAV & PY| GCS
-    PRAgent -->|Clone, Push & Create PR| GitHub
+    UnrealAgent -->|Multi-Modal Search| VectorSearch
+    UnrealAgent -->|C++ Code Generation| Gemini
+    ValidationAgent -->|g++ & UE Mock Smoke Test Sandbox| LocalSandbox[Local Sandbox Subprocess]
+    GCSUploader -->|Upload WAV & C++ Meta| GCS
+    PRAgent -->|Apply C++ Diff & Create PR| GitHub
+
     
     %% Security
     Runner -->|Resolve API Keys & tokens| SecretManager

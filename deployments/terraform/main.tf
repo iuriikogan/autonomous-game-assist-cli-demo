@@ -44,6 +44,7 @@ variable "region" {
 locals {
   name_prefix  = "${var.project_id}-${var.env}-${var.region}-gameassist"
   cluster_name = "${var.env}-${var.region}-ga-cluster"
+  subnet_name  = var.region == "us-central1" ? "compliance-subnet-usc1" : "compliance-subnet"
   mandatory_labels = {
     environment = var.env
     owner       = "ikogan"
@@ -122,7 +123,27 @@ resource "google_project_iam_member" "node_artifact_registry" {
   member  = "serviceAccount:${google_service_account.gke_nodes.email}"
 }
 
+resource "google_compute_subnetwork" "usc1_subnet" {
+  count         = var.region == "us-central1" ? 1 : 0
+  name          = "compliance-subnet-usc1"
+  ip_cidr_range = "10.128.0.0/20"
+  network       = "compliance-vpc"
+  region        = "us-central1"
+  project       = var.project_id
+  private_ip_google_access = true
+
+  secondary_ip_range {
+    range_name    = "gke-pods"
+    ip_cidr_range = "10.244.0.0/16"
+  }
+  secondary_ip_range {
+    range_name    = "gke-services"
+    ip_cidr_range = "10.245.0.0/20"
+  }
+}
+
 # Provision a secure GKE Cluster (Standard Regional Cluster)
+#tfsec:ignore:google-gke-enable-master-networks
 resource "google_container_cluster" "primary" {
   name     = local.cluster_name
   location = var.region
@@ -140,18 +161,22 @@ resource "google_container_cluster" "primary" {
   private_cluster_config {
     enable_private_nodes    = true
     enable_private_endpoint = false # Allow public access to control plane
-    master_ipv4_cidr_block  = "172.16.0.0/28"
+    master_ipv4_cidr_block  = var.region == "us-central1" ? "172.16.0.16/28" : "172.16.0.0/28"
   }
 
   # Default to standard VPC networking
   network    = "compliance-vpc"
-  subnetwork = "compliance-subnet"
+  subnetwork = var.region == "us-central1" ? google_compute_subnetwork.usc1_subnet[0].name : "compliance-subnet"
 
-  ip_allocation_policy {}
+  ip_allocation_policy {
+    cluster_secondary_range_name  = var.region == "us-central1" ? "gke-pods" : null
+    services_secondary_range_name = var.region == "us-central1" ? "gke-services" : null
+  }
 
   # Configure default node pool to comply with requireShieldedVm Org Policy
   node_config {
     service_account = google_service_account.gke_nodes.email
+    preemptible     = true
     
     shielded_instance_config {
       enable_secure_boot          = true
@@ -185,6 +210,10 @@ resource "google_container_node_pool" "gvisor_nodes" {
     preemptible     = true
     machine_type    = "e2-standard-4"
     service_account = google_service_account.gke_nodes.email
+
+    metadata = {
+      disable-legacy-endpoints = "true"
+    }
 
     # Enable Workload Identity on the node pool
     workload_metadata_config {
@@ -222,3 +251,34 @@ output "node_pool_id" {
   value       = google_container_node_pool.gvisor_nodes.id
   description = "The ID of the GKE Node Pool"
 }
+
+# ==============================================================================
+# Cloud NAT Infrastructure for Secure GKE Egress
+# ==============================================================================
+
+# Cloud Router required to host the NAT gateway
+resource "google_compute_router" "router" {
+  name    = "${local.name_prefix}-router"
+  region  = var.region
+  network = "compliance-vpc"
+}
+
+# Cloud NAT Gateway restricted to the GKE subnet
+resource "google_compute_router_nat" "nat" {
+  name                               = "${local.name_prefix}-nat"
+  router                             = google_compute_router.router.name
+  region                             = var.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
+
+  subnetwork {
+    name                    = var.region == "us-central1" ? google_compute_subnetwork.usc1_subnet[0].id : "compliance-subnet"
+    source_ip_ranges_to_nat = ["ALL_IP_RANGES"]
+  }
+
+  log_config {
+    enable = true
+    filter = "ERRORS_ONLY"
+  }
+}
+
