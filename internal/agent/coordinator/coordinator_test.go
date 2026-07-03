@@ -99,11 +99,11 @@ func TestCoordinator_Instantiation(t *testing.T) {
 	}
 
 	subAgents := coord.SubAgents()
-	if len(subAgents) != 6 {
-		t.Fatalf("expected 6 subagents in coordinator, got %d", len(subAgents))
+	if len(subAgents) != 4 {
+		t.Fatalf("expected 4 subagents in coordinator, got %d", len(subAgents))
 	}
 
-	expectedNames := []string{"prompt_crafter", "creative_audio", "unreal_agent", "validation_agent", "gcs_uploader", "pull_request_agent"}
+	expectedNames := []string{"unreal_agent", "validation_agent", "gcs_uploader", "pull_request_agent"}
 	for i, name := range expectedNames {
 		if subAgents[i].Name() != name {
 			t.Errorf("expected subagent %d to be %q, got %q", i, name, subAgents[i].Name())

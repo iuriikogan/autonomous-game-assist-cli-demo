@@ -18,7 +18,6 @@ Synthesize and output ONLY the binary audio data according to the requested soun
 
 	// Configure Gemini to emit WAV audio natively
 	audioConfig := &genai.GenerateContentConfig{
-		ResponseMIMEType:   "audio/wav",
 		ResponseModalities: []string{"AUDIO"},
 		SpeechConfig: &genai.SpeechConfig{
 			VoiceConfig: &genai.VoiceConfig{

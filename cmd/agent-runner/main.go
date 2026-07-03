@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/model/gemini"
@@ -25,8 +26,9 @@ import (
 func main() {
 	// Parse inputs and flags
 	promptFlag := flag.String("prompt", "", "The high-level sound & asset linkage request (e.g. 'footsteps on metal floor')")
+	audioFlag := flag.String("audio", "", "Path to existing WAV audio asset file (optional)")
 	userIDFlag := flag.String("user", "game_dev_1", "The user ID starting the request")
-	sessIDFlag := flag.String("session", "session_123", "The session ID")
+	sessIDFlag := flag.String("session", fmt.Sprintf("session_%d", time.Now().Unix()), "The session ID")
 	flag.Parse()
 
 	prompt := *promptFlag
@@ -115,17 +117,23 @@ func main() {
 	defer vectorClient.Close()
 
 	// 5. Initialize ADK Gemini LLM Backend
-	genaiCfg := &genai.ClientConfig{
-		Project:  projectID,
-		Location: location,
-		Backend:  genai.BackendVertexAI,
-	}
+	genaiCfg := &genai.ClientConfig{}
 	if apiKey != "" {
 		genaiCfg.APIKey = apiKey
+		genaiCfg.Backend = genai.BackendGeminiAPI
+	} else {
+		genaiCfg.Project = projectID
+		genaiCfg.Location = location
+		genaiCfg.Backend = genai.BackendVertexAI
 	}
 
+<<<<<<< HEAD
+	// Strict adherence to Gemini 3.1 Pro for heavy reasoning sub-agents
+	modelBackend, err := gemini.NewModel(ctx, "gemini-3.1-pro-preview", genaiCfg)
+=======
 	// Strict adherence to Gemini 3.1 Pro for heavy reasoning sub-agents (falling back to 2.5 due to project constraints)
 	modelBackend, err := gemini.NewModel(ctx, "gemini-2.5-pro", genaiCfg)
+>>>>>>> e0badb4f3e09d5cb53a52192b71766eba6a7f0b5
 	if err != nil {
 		log.Fatalf("Failed to initialize Gemini 3.1 Pro backend: %v", err)
 	}
@@ -161,12 +169,38 @@ func main() {
 		log.Fatalf("Failed to construct Central Coordinator sequential agent workflow: %v", err)
 	}
 
-	// 9. Initialize ADK runner
+	// 9. Initialize ADK runner and pre-populate session state with audio asset
+	// 9. Initialize ADK runner and pre-populate session state with audio asset
+	var audioBytes []byte
+	if *audioFlag != "" {
+		b, err := os.ReadFile(*audioFlag)
+		if err != nil {
+			log.Fatalf("Failed to read input audio file %s: %v", *audioFlag, err)
+		}
+		audioBytes = b
+	} else {
+		// Default sample WAV binary header
+		audioBytes = []byte("RIFF4\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00@\x1f\x00\x00@\x1f\x00\x00\x01\x00\x08\x00data\x00\x00\x00\x00")
+	}
+
+	sessSvc := session.InMemoryService()
+	_, err = sessSvc.Create(ctx, &session.CreateRequest{
+		AppName:   "autonomous-game-assist-cli",
+		UserID:    *userIDFlag,
+		SessionID: *sessIDFlag,
+		State: map[string]any{
+			"audio_binary": audioBytes,
+		},
+	})
+	if err != nil {
+		log.Fatalf("Failed to create session: %v", err)
+	}
+
 	adkRunner, err := runner.New(runner.Config{
 		AppName:           "autonomous-game-assist-cli",
 		Agent:             coordinatorAgent,
-		SessionService:    session.InMemoryService(),
-		AutoCreateSession: true,
+		SessionService:    sessSvc,
+		AutoCreateSession: false,
 	})
 	if err != nil {
 		log.Fatalf("Failed to bootstrap ADK Runner: %v", err)
