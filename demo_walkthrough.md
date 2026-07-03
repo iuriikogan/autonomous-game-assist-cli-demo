@@ -1,6 +1,6 @@
 # Step-by-Step Deployment & Operation Demo Guide
 
-This guide provides comprehensive, command-by-command instructions for setting up the **Autonomous Game Assist** platform infrastructure, deploying the agent runner in a hardened Google Kubernetes Engine (GKE) sandbox, and executing end-to-end jobs using the developer CLI.
+This guide provides comprehensive, command-by-command instructions for setting up the **Autonomous Game Assist** platform infrastructure, deploying the agent runner in a Google Kubernetes Engine sandbox, and executing end-to-end jobs using the developer CLI.
 
 ---
 
@@ -17,7 +17,7 @@ Run the following commands in your terminal to set up the deployment environment
 
 ```bash
 # Core GCP configurations
-export GCP_PROJECT="develop-491110"
+export GCP_PROJECT=<INSERT YOUR PROJECT ID>
 export GCP_LOCATION="us-central1"
 export ENV="dev"
 
@@ -28,8 +28,8 @@ export GCS_BUCKET="${GCP_PROJECT}-${ENV}-${GCP_LOCATION}-gameassist-bucket"
 export VECTOR_COLLECTION_ID="${GCP_PROJECT}-${ENV}-${GCP_LOCATION}-gameassist-collection"
 
 # GitHub Repository Details (For PR Agent review delivery)
-export GITHUB_OWNER="ikogan"
-export GITHUB_REPO="autonomous-game-assist-cli"
+export GITHUB_OWNER="iuriikogan" ## replace with your own repo
+export GITHUB_REPO="OpenWorldRPG"
 export GITHUB_BASE_BRANCH="main"
 export GITHUB_TOKEN_SECRET_PATH="projects/${GCP_PROJECT}/secrets/github-token/versions/latest"
 ```

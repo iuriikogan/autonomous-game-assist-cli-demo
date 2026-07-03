@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -71,6 +72,60 @@ func (kd *k8sDispatcher) DispatchJob(ctx context.Context, jobName, imageName str
 	runtimeClassName := "gvisor"
 	serviceAccountName := "game-assist-agent-runner"
 
+	// Read and validate required environment variables
+	gcsBucket := os.Getenv("GCS_BUCKET")
+	if gcsBucket == "" {
+		return nil, fmt.Errorf("missing required environment variable: GCS_BUCKET")
+	}
+	gcpProject := os.Getenv("GCP_PROJECT")
+	if gcpProject == "" {
+		return nil, fmt.Errorf("missing required environment variable: GCP_PROJECT")
+	}
+	githubTokenSecretPath := os.Getenv("GITHUB_TOKEN_SECRET_PATH")
+	if githubTokenSecretPath == "" {
+		return nil, fmt.Errorf("missing required environment variable: GITHUB_TOKEN_SECRET_PATH")
+	}
+	githubOwner := os.Getenv("GITHUB_OWNER")
+	if githubOwner == "" {
+		return nil, fmt.Errorf("missing required environment variable: GITHUB_OWNER")
+	}
+	githubRepo := os.Getenv("GITHUB_REPO")
+	if githubRepo == "" {
+		return nil, fmt.Errorf("missing required environment variable: GITHUB_REPO")
+	}
+
+	// Read optional environment variables with defaults
+	gcpLocation := os.Getenv("GCP_LOCATION")
+	if gcpLocation == "" {
+		gcpLocation = "us-central1"
+	}
+	githubBaseBranch := os.Getenv("GITHUB_BASE_BRANCH")
+	if githubBaseBranch == "" {
+		githubBaseBranch = "main"
+	}
+
+	// Assemble the container's environment variables
+	envVars := []corev1.EnvVar{
+		{Name: "GCS_BUCKET", Value: gcsBucket},
+		{Name: "GCP_PROJECT", Value: gcpProject},
+		{Name: "GITHUB_TOKEN_SECRET_PATH", Value: githubTokenSecretPath},
+		{Name: "GITHUB_OWNER", Value: githubOwner},
+		{Name: "GITHUB_REPO", Value: githubRepo},
+		{Name: "GCP_LOCATION", Value: gcpLocation},
+		{Name: "GITHUB_BASE_BRANCH", Value: githubBaseBranch},
+	}
+
+	// Add optional variables if present
+	if vectorCollectionID := os.Getenv("VECTOR_COLLECTION_ID"); vectorCollectionID != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: "VECTOR_COLLECTION_ID", Value: vectorCollectionID})
+	}
+	if geminiAPIKeySecretPath := os.Getenv("GEMINI_API_KEY_SECRET_PATH"); geminiAPIKeySecretPath != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: "GEMINI_API_KEY_SECRET_PATH", Value: geminiAPIKeySecretPath})
+	}
+	if mockAudio := os.Getenv("MOCK_AUDIO"); mockAudio != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: "MOCK_AUDIO", Value: mockAudio})
+	}
+
 	// Define the secure gVisor Job spec
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -97,6 +152,7 @@ func (kd *k8sDispatcher) DispatchJob(ctx context.Context, jobName, imageName str
 							Image:           imageName,
 							Command:         []string{"/app/agent-runner"},
 							Args:            args,
+							Env:             envVars,
 							ImagePullPolicy: corev1.PullAlways,
 							SecurityContext: &corev1.SecurityContext{
 								AllowPrivilegeEscalation: new(bool), // set to false

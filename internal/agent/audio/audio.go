@@ -1,9 +1,12 @@
 package audio
 
 import (
+	"iter"
+
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
+	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 )
 
@@ -35,3 +38,41 @@ Synthesize and output ONLY the binary audio data according to the requested soun
 		OutputKey:             "audio_binary",
 	})
 }
+
+// NewMock creates a mock Creative Audio agent that returns dummy audio data.
+func NewMock() (agent.Agent, error) {
+	maa := &mockAudioAgent{}
+	base, err := agent.New(agent.Config{
+		Name:        "creative_audio",
+		Description: "MOCK: Synthesizes dummy WAV audio for testing.",
+		Run:         maa.run,
+	})
+	if err != nil {
+		return nil, err
+	}
+	maa.Agent = base
+	return maa, nil
+}
+
+type mockAudioAgent struct {
+	agent.Agent
+}
+
+func (m *mockAudioAgent) run(ictx agent.InvocationContext) iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		sess := ictx.Session()
+
+		// Set dummy WAV bytes (a minimal valid-ish WAV header + some silence)
+		dummyWav := []byte("RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x22\x56\x00\x00\x22\x56\x00\x00\x01\x00\x08\x00data\x00\x00\x00\x00")
+		sess.State().Set("audio_binary", dummyWav)
+
+		evt := session.NewEvent(ictx.InvocationID())
+		evt.Content = &genai.Content{
+			Parts: []*genai.Part{
+				{Text: "SUCCESS: (MOCK) Audio synthesized successfully with dummy data."},
+			},
+		}
+		yield(evt, nil)
+	}
+}
+

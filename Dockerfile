@@ -1,5 +1,5 @@
 # Stage 1: Build the Go binary
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 WORKDIR /app
 
@@ -19,6 +19,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     g++ \
+    git \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

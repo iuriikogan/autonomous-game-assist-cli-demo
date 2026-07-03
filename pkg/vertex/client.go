@@ -54,9 +54,9 @@ func NewClient(ctx context.Context, project, location string) (Client, error) {
 
 // GenerateText sends a text prompt to either gemini-3.1-pro or gemini-3.1-flash.
 func (vc *vertexClient) GenerateText(ctx context.Context, prompt string, usePro bool) (string, error) {
-	model := "gemini-3.1-flash"
+	model := "gemini-2.5-flash"
 	if usePro {
-		model = "gemini-3.1-pro"
+		model = "gemini-2.5-pro"
 	}
 
 	contents := []*genai.Content{
